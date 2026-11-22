@@ -1,0 +1,50 @@
+{
+  "elapsed_seconds": 30.468,
+  "usage": {
+    "input_tokens": "UNKNOWN",
+    "output_tokens": "UNKNOWN",
+    "cost_usd": "premium_requests:1"
+  },
+  "payload": {
+    "challenged_claims": [
+      "The comparative groups are bibliographically supplied groupings, not a verified thematic or evidentiary synthesis.",
+      "Seminal-work claims are unsupported: the entries rely on model recall and provide no abstracts, full texts, methods, results, or citation evidence.",
+      "The claim that Dixon and Coles introduced an \"influential\" dynamic score model is unverified; \"influential\" should not be used until impact evidence is supplied.",
+      "Claiming that Rue and Salvesen developed the described dynamic Bayesian framework is unverified without the paper's methodology.",
+      "Claiming that Karlis and Ntzoufras improve probabilistic treatment of scores is unverified without an empirical comparison or results.",
+      "The described methods and advantages attributed to Baio and Blangiardo, Hvattum and Arntzen, Koopman and Lit, Groll and colleagues, and Anzer and Bauer are not established by the supplied evidence.",
+      "The statement that Mackenzie and Cushion demonstrate limitations or actionable-insight challenges is unsupported without a full-text review.",
+      "The claims that Pappalardo and colleagues provide an open, reproducible event resource and that Rein and Memmert discuss tactical-data limits are not verified from the supplied metadata.",
+      "Describing Decroos and colleagues' VAEP framework as extending valuation beyond goals and assists is a recalled substantive claim that requires source verification.",
+      "No supplied entry has verified research contribution, reported results, or limitations; marking these fields NOT_VERIFIED is therefore appropriate rather than merely precautionary."
+    ],
+    "missing_foundational": [
+      "Foundational Bradley-Terry and Elo-rating literature underlying the team-strength and match-prediction entries, including the original rating and paired-comparison works rather than only later football applications.",
+      "Foundational independent-goals and Poisson regression work in football, to establish whether Maher 1982 is being distinguished from later correlated-score and dynamic-strength models.",
+      "Foundational betting-market and forecast-calibration work is missing, so Dixon and Coles 1997 cannot be contextualized against market efficiency, probability scoring, or betting profitability literature.",
+      "Foundational work on bivariate Poisson and dependence modelling is missing, including the methodological precursors that establish the independent contribution of Karlis and Ntzoufras 2003.",
+      "Foundational football performance-indicator research predating Mackenzie and Cushion 2013 is missing; at minimum, source-verified papers on possession, shots, and outcome discrimination are needed before the later reviews can be characterized.",
+      "Foundational positional tracking and optical-tracking systems are missing, so Rein and Memmert 2016 and Memmert and colleagues 2017 cannot be positioned within the evolution of data collection accuracy and validation.",
+      "Foundational spatial and event-network methods are missing, including work on space control, pitch geometry, passing networks, and temporal movement modelling.",
+      "Foundational expected-goals and shot-quality literature is missing, so the Anzer and Bauer entry cannot be evaluated as an extension of chance-quality and player-finishing work.",
+      "Foundational player-action valuation studies predating VAEP, including earlier on-ball value and possession-value frameworks, are required to assess the novelty of Decroos and colleagues 2019.",
+      "A systematic reproducibility and data-provenance source is missing for the public event-data entry; ownership, licensing, coverage, missing-event behavior, and identifiers need to be established."
+    ],
+    "corrections": [
+      "Goddard 2005: keep the title, DOI, and substantive record, but report 2004 as the DOI/publication-year metadata; if 2005 is retained as an issue or print year, explicitly label it as such.",
+      "Hvattum and Arntzen 2010: report 2009 as the DOI/publication metadata unless a separately verified print-publication year is documented.",
+      "Constantinou, Fenton, and Neil pi-football: remove the supplied DOI and 2011.10.003 association because the supplied cross-check resolves it to a different 2021 paper and DOI; verify the article record before retaining it.",
+      "Koopman and Lit 2015: report 2013 as the DOI/publication metadata unless a verified 2015 print/issue year is established, and label online-versus-print dates explicitly.",
+      "Groll, Schauberger, and Tutz: do not associate 10.3233/JSA-150006 with the listed paper until the DOI record is corrected; the supplied cross-check associates it with an Editorial.",
+      "Bunker and Thabtah 2019: report 2017 as the DOI/publication-year metadata unless the journal's 2019 issue publication is independently verified.",
+      "Mackenzie and Cushion 2013: report 2012 as the DOI/publication metadata unless 2013 is independently confirmed as the issue or print year.",
+      "Lago-Peñas and colleagues 2010: retain the title and 2010 year only; remove or qualify 10.1080/0264041090358101 as a DOI until a publisher record verifies it because the cross-check found no DOI.",
+      "Memmert, Lemmink, and Sampaio 2017: remove the supplied DOI and year because the cross-check points to a differently titled 2018 record with 10.4324/9781351210164; verify the exact intended journal article or chapter.",
+      "Pappalardo and colleagues 2019: replace or verify 10.1038/sdata.2019.236 because the supplied cross-check reports 10.1038/s41597-019-0247-7 for the matching title and year.",
+      "Anzer and Bauer 2021: remove 10.1371/journal.pone.0255518 because the supplied DOI resolves to an unrelated China CO2-flow paper; verify the PLOS ONE record and correct the identifier.",
+      "Maher 1982, Dixon and Coles 1997, Rue and Salvesen 2000, Karlis and Ntzoufras 2003, Baio and Blangiardo 2010, Sarmento and colleagues 2014, Rein and Memmert 2016, Gudmundsson and Horton 2017, and Decroos and colleagues 2019 may be retained as verified title/year/DOI matches, but these checks do not verify substantive relevance or seminal status.",
+      "Replace any recalled contribution, result, limitation, or seminal-status wording with NOT_VERIFIED until the relevant source text is added.",
+      "Correct mismatched venue, year, title, and DOI fields to preserve separate DOI/publication and print/issue metadata instead of silently overwriting one with the other."
+    ]
+  }
+}

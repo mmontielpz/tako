@@ -1,0 +1,36 @@
+{
+  "elapsed_seconds": 0.0,
+  "usage": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cost_usd": 0.0
+  },
+  "payload": {
+    "related_topics": [
+      "Quantum Reservoir Computing",
+      "Echo State Networks",
+      "Liquid State Machines",
+      "Quantum Circuit Architectures"
+    ],
+    "papers": [
+      {
+        "Title": "Harnessing Nonlinearity: Predicting Chaotic Systems and Saving Energy in Wireless Communication",
+        "Authors": "Herbert Jaeger; Harald Haas",
+        "Year": 2004,
+        "Publication venue": "Science",
+        "DOI or source URL": "https://doi.org/10.1126/science.1091277",
+        "Seminal work candidate": "YES (classical Echo State Network baseline)",
+        "Evidence level": "abstract-based"
+      },
+      {
+        "Title": "Harnessing Disordered-Ensemble Quantum Dynamics for Machine Learning",
+        "Authors": "Keisuke Fujii; Kohei Nakajima",
+        "Year": 2017,
+        "Publication venue": "Physical Review Applied",
+        "DOI or source URL": "https://doi.org/10.1103/PhysRevApplied.8.024030",
+        "Seminal work candidate": "YES (early Quantum Reservoir Computing formulation)",
+        "Evidence level": "abstract-based"
+      }
+    ]
+  }
+}

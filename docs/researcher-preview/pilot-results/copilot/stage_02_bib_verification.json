@@ -1,0 +1,92 @@
+[
+  {
+    "Title": "The \"Echo State\" Approach to Analysing and Training Recurrent Neural Networks",
+    "returned_year": 2001,
+    "url": "https://doi.org/10.13140/RG.2.1.4428.0645",
+    "oa_title": "Deep Echo State Network (DeepESN): A Brief Survey",
+    "oa_year": 2017,
+    "oa_doi": "https://doi.org/10.48550/arxiv.1712.04323",
+    "openalex_match": "MISMATCH"
+  },
+  {
+    "Title": "Real-Time Computing Without Stable States: A New Framework for Neural Computation Based on Perturbations",
+    "returned_year": 2002,
+    "url": "https://doi.org/10.1162/089976602760407955",
+    "oa_title": "Real-Time Computing Without Stable States: A New Framework for Neural Computation Based on Perturbations",
+    "oa_year": 2002,
+    "oa_doi": "https://doi.org/10.1162/089976602760407955",
+    "openalex_match": "VERIFIED"
+  },
+  {
+    "Title": "Harnessing Disordered-Ensemble Quantum Dynamics for Machine Learning",
+    "returned_year": 2017,
+    "url": "https://doi.org/10.1103/PhysRevApplied.8.024030",
+    "oa_title": "Harnessing Disordered-Ensemble Quantum Dynamics for Machine Learning",
+    "oa_year": 2017,
+    "oa_doi": "https://doi.org/10.1103/physrevapplied.8.024030",
+    "openalex_match": "VERIFIED"
+  },
+  {
+    "Title": "Quantum Reservoir Processing",
+    "returned_year": 2019,
+    "url": "https://doi.org/10.1038/s41534-019-0174-1",
+    "oa_title": "Quantum reservoir processing",
+    "oa_year": 2019,
+    "oa_doi": "https://doi.org/10.1038/s41534-019-0149-8",
+    "openalex_match": "MISMATCH"
+  },
+  {
+    "Title": "Boosting Computational Power through Spatial Multiplexing in Quantum Reservoir Computing",
+    "returned_year": 2019,
+    "url": "https://doi.org/10.1103/PhysRevApplied.11.034021",
+    "oa_title": "Boosting Computational Power through Spatial Multiplexing in Quantum Reservoir Computing",
+    "oa_year": 2019,
+    "oa_doi": "https://doi.org/10.1103/physrevapplied.11.034021",
+    "openalex_match": "VERIFIED"
+  },
+  {
+    "Title": "Optimizing a Quantum Reservoir Computer for Time Series Prediction",
+    "returned_year": 2020,
+    "url": "https://doi.org/10.1038/s41598-020-71673-9",
+    "oa_title": "Optimizing a quantum reservoir computer for time series prediction",
+    "oa_year": 2020,
+    "oa_doi": "https://doi.org/10.1038/s41598-020-71673-9",
+    "openalex_match": "VERIFIED"
+  },
+  {
+    "Title": "Temporal Information Processing on Noisy Quantum Computers",
+    "returned_year": 2020,
+    "url": "https://doi.org/10.1103/PhysRevApplied.14.024065",
+    "oa_title": "Temporal Information Processing on Noisy Quantum Computers",
+    "oa_year": 2020,
+    "oa_doi": "https://doi.org/10.1103/physrevapplied.14.024065",
+    "openalex_match": "VERIFIED"
+  },
+  {
+    "Title": "Opportunities in Quantum Reservoir Computing and Extreme Learning Machines",
+    "returned_year": 2021,
+    "url": "https://doi.org/10.1002/qute.202100094",
+    "oa_title": "Imaging Spin‐Wave Damping Underneath Metals Using Electron Spins in Diamond",
+    "oa_year": 2021,
+    "oa_doi": "https://doi.org/10.1002/qute.202100094",
+    "openalex_match": "MISMATCH"
+  },
+  {
+    "Title": "Gaussian States of Continuous-Variable Quantum Systems Provide Universal Quantum Reservoir Computing",
+    "returned_year": 2021,
+    "url": "https://doi.org/10.1038/s42005-021-00556-w",
+    "oa_title": "Gaussian states of continuous-variable quantum systems provide universal and versatile reservoir computing",
+    "oa_year": 2021,
+    "oa_doi": "https://doi.org/10.1038/s42005-021-00556-w",
+    "openalex_match": "VERIFIED"
+  },
+  {
+    "Title": "Higher-Order Quantum Reservoir Computing",
+    "returned_year": 2021,
+    "url": "https://doi.org/10.1103/PhysRevLett.127.260401",
+    "oa_title": "Learning Temporal Quantum Tomography",
+    "oa_year": 2021,
+    "oa_doi": "https://doi.org/10.1103/physrevlett.127.260401",
+    "openalex_match": "MISMATCH"
+  }
+]
