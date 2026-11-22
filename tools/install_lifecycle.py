@@ -135,10 +135,11 @@ def cmd_update(argv: list[str]) -> int:
             print(f'TAKO_UP_TO_DATE version="{pep440}" home="{tako_home}" sha256="{actual}"')
             return 0
 
+        base_python = str(pathlib.Path(sys.executable).resolve())
         backup_venv = tako_home / f".venv.backup.{os.getpid()}"
         venv_dir.rename(backup_venv)
         try:
-            venv.create(venv_dir, with_pip=True)
+            subprocess.run([base_python, "-m", "venv", str(venv_dir)], check=True, capture_output=True, text=True)
             venv_py = venv_dir / "bin" / "python"
             subprocess.run(
                 [str(venv_py), "-m", "pip", "install", "--no-deps", "--no-index", "--quiet", str(wheel_path)],
