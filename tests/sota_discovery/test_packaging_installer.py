@@ -3,14 +3,34 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import pathlib
 import shutil
 import subprocess
 import tempfile
 import unittest
+import zipfile
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+
+
+def _build_minimal_wheel(dest_dir: pathlib.Path) -> pathlib.Path:
+    """Build a minimal valid pure-Python wheel from tools/ using stdlib zipfile (no setuptools required)."""
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    whl_path = dest_dir / "tako_researcher_preview-0.1.0a1-py3-none-any.whl"
+    dist_info = "tako_researcher_preview-0.1.0a1.dist-info"
+    with zipfile.ZipFile(whl_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for py in sorted((REPO_ROOT / "tools").rglob("*.py")):
+            zf.write(py, py.relative_to(REPO_ROOT).as_posix())
+        fx = REPO_ROOT / "tools" / "sota_ai_native" / "example_fixture.json"
+        if fx.is_file():
+            zf.write(fx, fx.relative_to(REPO_ROOT).as_posix())
+        zf.writestr(f"{dist_info}/METADATA", "Metadata-Version: 2.1\nName: tako-researcher-preview\nVersion: 0.1.0a1\n")
+        zf.writestr(f"{dist_info}/WHEEL", "Wheel-Version: 1.0\nGenerator: tako-test\nRoot-Is-Purelib: true\nTag: py3-none-any\n")
+        zf.writestr(f"{dist_info}/entry_points.txt", "[console_scripts]\ntako = tools.cli:main\n")
+        zf.writestr(f"{dist_info}/RECORD", "")
+    return whl_path
 
 
 class PackagingInstallerTests(unittest.TestCase):
@@ -27,17 +47,11 @@ class PackagingInstallerTests(unittest.TestCase):
         shutil.copy2(REPO_ROOT / "scripts" / "uninstall-linux.sh", kit_dir / "uninstall-linux.sh")
 
     def test_installer_checksum_mismatch_unsafe_overwrite_and_uninstall_safety(self):
+        if os.name == "nt":
+            self.skipTest("Linux shell installer test runs on POSIX")
         with tempfile.TemporaryDirectory() as tmp:
             tmp_p = pathlib.Path(tmp)
-            dist_dir = tmp_p / "dist"
-            build = subprocess.run(
-                ["python3", "-m", "pip", "wheel", "--no-deps", "--no-build-isolation", "-w", str(dist_dir), str(REPO_ROOT)],
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
-            self.assertEqual(build.returncode, 0, msg=build.stderr)
-            whl = next(dist_dir.glob("tako_researcher_preview-0.1.0a1-*.whl"))
+            whl = _build_minimal_wheel(tmp_p / "dist")
 
             # 1. Checksum mismatch must fail before creating venv
             bad_kit = tmp_p / "bad_kit"
