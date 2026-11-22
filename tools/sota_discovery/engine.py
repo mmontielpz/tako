@@ -268,9 +268,34 @@ def _register_raw_candidate(
     rec["_source_observations"] = [obs]
     rec["_publication_stages"] = [stage]
     rec["_metadata_conflicts"] = []
+    rec["_related_versions"] = []
     buckets["RAW_CANDIDATES"][cid] = rec
     for a in aliases:
         alias_map.setdefault(a, cid)
+    # R05: If an explicit shared arXiv ID exists on another distinct-DOI record, link without merging
+    if arxiv_key:
+        for other_cid, other_rec in buckets["RAW_CANDIDATES"].items():
+            if other_cid == cid:
+                continue
+            other_arxiv = _extract_arxiv_id(
+                other_rec["_raw_work"].get("arxiv_id")
+                or other_rec["_raw_work"].get("doi")
+                or other_rec["_raw_work"].get("id")
+                or ""
+            )
+            if other_arxiv and f"arxiv:{other_arxiv}" == arxiv_key:
+                rec["_related_versions"].append({
+                    "relation": "shared_arxiv_version_different_doi",
+                    "canonical_id": other_cid,
+                    "arxiv_id": other_arxiv,
+                    "doi": other_rec.get("DOI or source URL", ""),
+                })
+                other_rec.setdefault("_related_versions", []).append({
+                    "relation": "shared_arxiv_version_different_doi",
+                    "canonical_id": cid,
+                    "arxiv_id": other_arxiv,
+                    "doi": rec.get("DOI or source URL", ""),
+                })
     return True, cid
 
 

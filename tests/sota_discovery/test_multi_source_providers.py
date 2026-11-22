@@ -317,6 +317,98 @@ class MultiSourceProviderTests(unittest.TestCase):
             self.assertEqual(tel["provider_requests"].get("openalex"), 2)
             self.assertEqual(trace["state_accounting"]["accepted"], 1)
 
+    def test_r02_provider_pacing_and_retry_after_with_mocked_clock(self):
+        now = [100.0]
+        sleeps = []
+
+        def fake_clock():
+            return now[0]
+
+        def fake_sleep(s):
+            sleeps.append(s)
+            now[0] += s
+
+        attempts = {"n": 0}
+
+        def fake_open(req, timeout=15.0):
+            attempts["n"] += 1
+            if attempts["n"] == 1:
+                raise urllib.error.HTTPError(req.full_url, 429, "Too Many Requests", {"Retry-After": "2"}, None)
+            return _FakeResp(ARXIV_ATOM_XML)
+
+        tracker = HttpRequestTracker(max_http_requests=5, clock=fake_clock, sleep_fn=fake_sleep)
+        with mock.patch("tools.sota_discovery.sota._default_no_redirect_open", side_effect=fake_open):
+            tracker.get_text("https://export.arxiv.org/api/query?search_query=all:gnn", provider="arxiv", max_retries=1)
+        # Retry-After=2s + arXiv min interval 3.0s (elapsed 2.0 -> sleeps 1.0s)
+        self.assertEqual(tracker.retry_after_waits, 1)
+        self.assertEqual(tracker.pacing_waits, 1)
+        self.assertIn(2.0, sleeps)
+        self.assertIn(1.0, sleeps)
+
+    def test_r03_safe_default_http_budget_when_omitted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = pathlib.Path(tmp) / "default_budget_out"
+            with mock.patch("tools.sota_discovery.sota._default_no_redirect_open", return_value=_FakeResp(json.dumps({"results": []}))):
+                with redirect_stdout(io.StringIO()):
+                    rc = cli_main([
+                        "sota",
+                        "--topic", "Graph Neural Networks",
+                        "--objective", "Survey",
+                        "--iterative",
+                        "--max-rounds", "1",
+                        "--max-requests", "1",
+                        "--citation-depth", "0",
+                        "--out-dir", str(out_dir),
+                    ])
+            self.assertEqual(rc, 0)
+            trace = json.loads((out_dir / "discovery_trace.json").read_text(encoding="utf-8"))
+            self.assertEqual(trace["measurements"]["observable_http_telemetry"]["max_http_requests"], 24)
+
+    def test_r04_provider_classifications_distinguish_free_unimplemented_and_fixture(self):
+        rows = list_provider_capabilities()
+        sci = [r for r in rows if r["is_scientific_source"]]
+        non_sci = [r for r in rows if not r["is_scientific_source"]]
+        self.assertEqual(len(sci), 19)
+        self.assertEqual(len(non_sci), 1)
+        by_id = {r["provider_id"]: r for r in rows}
+        self.assertEqual(by_id["pubmed"]["availability_classification"], "FREE_OPEN_UNIMPLEMENTED")
+        self.assertEqual(by_id["scopus"]["availability_classification"], "LICENSE_RESTRICTED_UNIMPLEMENTED")
+
+    def test_r05_preprint_and_published_with_different_dois_linked_not_merged(self):
+        plan = build_research_plan(
+            topic="Graph Neural Networks Molecular",
+            objective="Compare methods",
+            concept_groups={"core_topic": ["graph", "neural"]},
+            prefer_review_first=False,
+            max_papers=10,
+            max_rounds=1,
+        )
+        w_pre = {
+            "id": "https://arxiv.org/abs/2301.12345",
+            "arxiv_id": "2301.12345",
+            "doi": "https://doi.org/10.48550/arXiv.2301.12345",
+            "display_name": "Graph Neural Networks for Molecules",
+            "publication_year": 2023,
+            "abstract": "Graph neural networks predict molecular properties.",
+            "publication_stage": "preprint",
+            "_provider_source": "arxiv",
+        }
+        w_pub = {
+            "id": "https://doi.org/10.1021/ci.2023.001",
+            "arxiv_id": "2301.12345",
+            "doi": "https://doi.org/10.1021/ci.2023.001",
+            "display_name": "Graph Neural Networks for Molecules",
+            "publication_year": 2024,
+            "abstract": "Graph neural networks predict molecular properties.",
+            "publication_stage": "published",
+            "_provider_source": "crossref",
+        }
+        res = run_iterative_discovery(plan, search_fn=lambda q, n: [w_pre, w_pub])
+        self.assertEqual(res["state_accounting"]["unique_canonical_identities"], 2)
+        recs = list(res["buckets"]["RAW_CANDIDATES"].values())
+        self.assertEqual(len(recs[0]["_related_versions"]), 1)
+        self.assertEqual(len(recs[1]["_related_versions"]), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -8,6 +8,7 @@ import json
 import pathlib
 import re
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -74,11 +75,37 @@ def _default_no_redirect_open(req: urllib.request.Request, timeout: float = 15.0
     return opener.open(req, timeout=timeout)
 
 
-class HttpRequestTracker:
-    """Tracks observable HTTP transport attempts, retries, failures, redirects, cache hits, and per-provider counts."""
+DEFAULT_SAFE_MAX_HTTP_REQUESTS = 24
 
-    def __init__(self, max_http_requests: int | None = None) -> None:
+PROVIDER_MIN_INTERVAL_SECONDS: dict[str, float] = {
+    "openalex": 0.1,
+    "arxiv": 3.0,
+    "crossref": 0.35,
+    "semantic-scholar": 1.0,
+}
+
+
+class HttpRequestTracker:
+    """Tracks observable HTTP transport attempts, retries, failures, redirects, cache hits, pacing, and per-provider counts."""
+
+    def __init__(
+        self,
+        max_http_requests: int | None = None,
+        *,
+        clock: Any = None,
+        sleep_fn: Any = None,
+        provider_min_intervals: dict[str, float] | None = None,
+    ) -> None:
         self.max_http_requests = max_http_requests
+        self._clock = clock or time.monotonic
+        self._sleep = sleep_fn or time.sleep
+        self._provider_min_intervals = dict(PROVIDER_MIN_INTERVAL_SECONDS)
+        if provider_min_intervals:
+            self._provider_min_intervals.update(provider_min_intervals)
+        self._last_provider_request_ts: dict[str, float] = {}
+        self.pacing_waits = 0
+        self.total_pacing_sleep_seconds = 0.0
+        self.retry_after_waits = 0
         self.http_attempts = 0
         self.http_successes = 0
         self.http_failures = 0
@@ -92,6 +119,23 @@ class HttpRequestTracker:
         self.provider_requests: dict[str, int] = {}
         self.budget_exhausted = False
         self._cache: dict[str, Any] = {}
+
+    def _pace_provider(self, provider: str) -> None:
+        min_gap = float(self._provider_min_intervals.get(provider, 0.0))
+        if min_gap <= 0.0:
+            self._last_provider_request_ts[provider] = float(self._clock())
+            return
+        now = float(self._clock())
+        prev = self._last_provider_request_ts.get(provider)
+        if prev is not None:
+            elapsed = now - prev
+            if elapsed < min_gap:
+                wait_s = round(min_gap - elapsed, 4)
+                self._sleep(wait_s)
+                self.pacing_waits += 1
+                self.total_pacing_sleep_seconds = round(self.total_pacing_sleep_seconds + wait_s, 4)
+                now = float(self._clock())
+        self._last_provider_request_ts[provider] = now
 
     def _request_raw(
         self,
@@ -128,6 +172,7 @@ class HttpRequestTracker:
                         raise HttpBudgetExhaustedError(
                             f"HTTP request budget exhausted ({self.http_attempts}/{self.max_http_requests}) before {provider}:{category} request."
                         )
+                    self._pace_provider(provider)
                     self.http_attempts += 1
                     self.provider_requests[provider] = self.provider_requests.get(provider, 0) + 1
                     if category == "search":
@@ -149,6 +194,11 @@ class HttpRequestTracker:
                             if resp.status == 429:
                                 self.rate_limited_responses += 1
                                 self.http_failures += 1
+                                ra = resp.headers.get("Retry-After") if hasattr(resp, "headers") and resp.headers else None
+                                if ra and str(ra).strip().isdigit() and attempt_idx < max_retries:
+                                    wait_ra = min(float(str(ra).strip()), 10.0)
+                                    self._sleep(wait_ra)
+                                    self.retry_after_waits += 1
                                 last_exc = RetrievalError(f"{provider} HTTP 429 rate limited for {cur_url}")
                                 break
                             if resp.status != 200:
@@ -167,6 +217,11 @@ class HttpRequestTracker:
                             continue
                         if he.code == 429:
                             self.rate_limited_responses += 1
+                            ra = he.headers.get("Retry-After") if he.headers else None
+                            if ra and str(ra).strip().isdigit() and attempt_idx < max_retries:
+                                wait_ra = min(float(str(ra).strip()), 10.0)
+                                self._sleep(wait_ra)
+                                self.retry_after_waits += 1
                         self.http_failures += 1
                         last_exc = he
                         break
@@ -238,6 +293,9 @@ class HttpRequestTracker:
             "citation_requests": self.citation_requests,
             "bib_verification_requests": self.bib_verification_requests,
             "rate_limited_responses": self.rate_limited_responses,
+            "pacing_waits": self.pacing_waits,
+            "total_pacing_sleep_seconds": self.total_pacing_sleep_seconds,
+            "retry_after_waits": self.retry_after_waits,
             "provider_requests": dict(self.provider_requests),
             "budget_exhausted": self.budget_exhausted,
         }
@@ -606,7 +664,7 @@ def main(argv: list[str] | None = None) -> int:
         "--max-http-requests",
         type=int,
         default=None,
-        help="Maximum observable HTTP attempts across search, verification, citation expansion, retries, and redirects",
+        help=f"Maximum observable HTTP attempts across search, verification, citation expansion, retries, and redirects (default for live iterative discovery: {DEFAULT_SAFE_MAX_HTTP_REQUESTS})",
     )
     parser.add_argument("--citation-depth", type=int, default=1, help="Citation exploration depth (default: 1)")
     parser.add_argument("--no-review-first", action="store_true", help="Disable review-first discovery seed step")
@@ -644,8 +702,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 2
 
-        if args.max_http_requests is not None:
-            plan["limits"]["max_http_requests"] = args.max_http_requests
+        effective_max_http = args.max_http_requests if args.max_http_requests is not None else (DEFAULT_SAFE_MAX_HTTP_REQUESTS if args.fixture is None else None)
+        if effective_max_http is not None:
+            plan["limits"]["max_http_requests"] = effective_max_http
 
         sources = [s.strip().lower() for s in str(args.sources or "openalex").split(",") if s.strip()]
         if not sources:
@@ -654,7 +713,7 @@ def main(argv: list[str] | None = None) -> int:
 
         search_fn = None
         citation_fn = fetch_openalex_citations if (args.fixture is None and args.citation_depth >= 1 and "openalex" in sources) else None
-        tracker = HttpRequestTracker(max_http_requests=args.max_http_requests) if args.fixture is None else None
+        tracker = HttpRequestTracker(max_http_requests=effective_max_http) if args.fixture is None else None
         multi_errors: list[str] = []
         if args.fixture is not None:
             fx_data = json.loads(args.fixture.read_text(encoding="utf-8"))

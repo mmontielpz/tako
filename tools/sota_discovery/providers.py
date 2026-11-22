@@ -374,8 +374,31 @@ def list_provider_capabilities(profile: str | None = None) -> list[dict[str, Any
         env_vars = spec["auth_env_vars"]
         env_status = {var: bool(os.environ.get(var, "").strip()) for var in env_vars}
         configured = True if not spec["key_required"] else any(env_status.values())
+        modes = spec["access_modes"]
+        license_required = "INSTITUTIONAL_LICENSE" in modes or "PAID_API" in modes
+        auth_required = bool(spec["key_required"] or "OAUTH_PERSONAL_LIBRARY" in modes)
+        is_scientific = pid != "fixture"
+        if spec["implementation_status"] == "IMPLEMENTED":
+            if "MANUAL_ASSISTED" in modes:
+                avail_class = "MANUAL_ASSISTED"
+            elif auth_required and not configured:
+                avail_class = "IMPLEMENTED_NEEDS_CREDENTIALS"
+            else:
+                avail_class = "IMPLEMENTED_AVAILABLE"
+        else:
+            if not auth_required and not license_required:
+                avail_class = "FREE_OPEN_UNIMPLEMENTED"
+            elif license_required:
+                avail_class = "LICENSE_RESTRICTED_UNIMPLEMENTED"
+            else:
+                avail_class = "KEY_OR_OAUTH_UNIMPLEMENTED"
         rows.append({
             **spec,
+            "is_scientific_source": is_scientific,
+            "auth_required": auth_required,
+            "license_required": license_required,
+            "entitlement_verified": False if license_required else None,
+            "availability_classification": avail_class,
             "credentials_present": env_status,
             "configured": configured,
         })
