@@ -54,3 +54,7 @@ stateDiagram-v2
   AbstractOnly --> ExploratoryMap: INSUFFICIENT_EVIDENCE Gate
   EvidenceGrounded --> SupportedClaim: Claim + Passage Locator
 ```
+
+## 5. Desktop Event & Workspace Bridge Contract (`M029B`)
+- **Workflow Events (`tako-workflow-event/v1`):** Emitted as JSONL (`<workspace>/runs/<run_id>_events.jsonl` or `--events-file`) with `run_id`, `workspace_id`, `event_type`, `stage`, `elapsed_seconds`, distinct `counters`, `artifacts`, and sanitized `error`.
+- **Shared Workspace State (`tako_workspace.json`):** Single source of truth tracking `NOT_STARTED`, `RUNNING`, `COMPLETED`, `FAILED`, `INTERRUPTED`, and `STALE` (detected when registered outputs are missing on disk). Rust/Tauri Desktop consumes these exact JSON/JSONL contracts without duplicating Python orchestration or Tier 1 gates.
