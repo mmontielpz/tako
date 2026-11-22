@@ -88,3 +88,7 @@ TAKO is fully open source. A small number of related projects remain private; th
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Report security issues as described in [SECURITY.md](SECURITY.md). All participation is governed by the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Experimental Researcher Preview (`0.0.1.dev2`)
+
+See [Windows Quickstart](docs/researcher-preview/WINDOWS_QUICKSTART.md), [Provider Compatibility](docs/researcher-preview/PROVIDER_COMPATIBILITY.md), [Known Limitations](docs/researcher-preview/KNOWN_LIMITATIONS.md), and [Researcher Feedback](docs/researcher-preview/RESEARCHER_FEEDBACK.md). Report issues via [GitHub Issues](https://github.com/mmontielpz/tako/issues) (do not post credentials or confidential research).
