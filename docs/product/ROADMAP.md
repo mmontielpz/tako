@@ -54,8 +54,8 @@ Cloud/data integrations, multi-agent orchestration, team features, marketplace, 
 | `P0` | Engineering Foundation | Public repo hygiene (`ENG-01`), OSS readiness (`ENG-02`), deterministic Python CLI CI, roadmap reconciliation |
 | `P1` | Scientific Integrity / Increment A / `dev4` | Resolve canonical `v0.0.1.dev3` scientific defects (`F01`–`F06`) before `0.0.1.dev4` |
 | `P2` | Discovery Intelligence / Increment B | Hybrid discovery, query expansion, snowballing, relevance improvements (`F07`) |
-| `P3` | Evidence and Comparative SOTA / Increment C | Auditable screening, structured extraction, comparative synthesis & gap analysis |
-| `P4` | CLI Product Readiness and Interoperability | Polished CLI workflows, export formats, native Windows CLI qualification |
+| `P3` | Evidence and Comparative SOTA / Increment C | Auditable screening, structured extraction, comparative synthesis & gap analysis (`P3_ENGINEERING_IMPLEMENTATION_STATUS=COMPLETED_ON_DEVELOP`; formal scientific validation deferred to `P5`–`P6`) |
+| `P4` | CLI Product Readiness and Interoperability | Polished CLI workflows, export formats, native Windows CLI qualification (`NEXT_MISSION=TAKO-CLI-PRODUCT-READINESS-023`) |
 | `P5` | Internal Scientific Benchmarks | Formal internal validation: `INTERNAL_BENCHMARK_SEQUENCE=B02,B04,B05,B06` |
 | `P6` | Refinement and External Scientific Validation | External baselines & evaluation: `EXTERNAL_BENCHMARK_SEQUENCE=B01,B03` |
 | `P7` | Desktop App | Connect Rust/Tauri desktop shell via versioned JSON boundary; native Desktop qualification |

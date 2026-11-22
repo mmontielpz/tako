@@ -5,6 +5,21 @@ All notable changes to the public TAKO repository are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [PEP 440](https://peps.python.org/pep-0440/) / [SemVer](https://semver.org/) for releases.
 
+## [Unreleased] — `0.0.1.dev6` Candidate (Increment C: Evidence & Comparative SOTA)
+
+### Added
+- Evidence-grounded extraction, claim verification, comparative analysis, and Tier 1 quality gating (`tools/sota_evidence.py`), wired via `tako evidence`:
+  - Evidence acquisition and availability classification (`acquire_evidence`) distinguishing `FULL_TEXT_LOCAL`, `ABSTRACT_BASED`, `METADATA_ONLY`, `UNAVAILABLE`, and `MODEL_RECALL` (no silent full-text fallback).
+  - Structured scientific extraction (`normalize_extraction`) capturing study metadata, method, dataset, metric, result, limitations, and explicit uncertainty/absent-value semantics.
+  - ResearchOS-adapted deterministic textual correspondence (`verify_textual_correspondence`) with provisional `0.85` / `0.50` thresholds, structured locators (`page`, `section`, `paragraph`, `line_range`, `char_range`), source-mismatch detection, and strict separation from semantic entailment (never auto-promoting `CLAIM_SUPPORT_STATUS` to `SUPPORTED`).
+  - Traceable claim registry (`register_claims`, `claims_registry.csv`) enforcing `MODEL_RECALL` and `METADATA_ONLY` abstention.
+  - Pairwise paper comparability (`compare_papers`, `comparisons.csv`, `comparative_synthesis.md`) classifying `DIRECTLY_COMPARABLE`, `CONDITIONALLY_COMPARABLE`, and `NOT_COMPARABLE` with explicit reasons and incompatibility notes.
+  - Conservative research-gap assessment (`assess_research_gaps`, `research_gaps.csv`) separating `AUTHOR_REPORTED_LIMITATION`, `CORPUS_LIMITATION`, `MISSING_COMPARISON`, `RESEARCH_OPPORTUNITY`, `SPECULATIVE_HYPOTHESIS`, and `INSUFFICIENT_EVIDENCE`.
+  - All 7 canonical M017A Tier 1 quality gates (`evaluate_tier1_quality`, `quality_report.json`): `QM-B02`, `QM-B03`, `QM-B04`, `QM-E03`, `QM-G04`, `QM-G05`, `QM-C03` with `PASS | FAIL | NOT_MEASURED | NOT_APPLICABLE | INSUFFICIENT_EVIDENCE` states.
+  - Bounded remediation & downstream artifact regeneration (`run_evidence_and_comparative_pipeline`) and Minimum Viable SOTA report qualification (`EXPLORATORY_LITERATURE_MAP` vs `EVIDENCE_GROUNDED_COMPARATIVE_SOTA`, `sota_report.md`).
+  - Offline scenario regression suite (`tests/sota_ai_native/test_evidence_comparative_sota.py`, `E01`–`E20`).
+  - Targeted integrity closeout (`M022-R01`–`M022-R06`): claim support completeness invariant preventing false `PASS` on `NOT_CHECKED`/`NOT_VERIFIED`/`PARTIALLY_SUPPORTED` or caller-supplied `SUPPORTED` without `assessment_evidence`; field-level extraction provenance rejecting injected absent fields; actual `char:`/`line:`/`page:`/`section:` locator verification; numerical audit records in `QM-E03` and non-penalizing `QM-C03` abstention; end-to-end `tako evidence --from-workflow-dir` interoperability from `tako sota --iterative` and `tako sota-ai`.
+
 ## [Unreleased] — `0.0.1.dev5` Candidate (Increment B: Discovery Intelligence)
 
 ### Added
