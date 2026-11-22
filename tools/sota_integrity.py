@@ -299,6 +299,8 @@ def verify_paper_identity(
         base_record["openalex_match"] = outcome
         return base_record
     except Exception as exc:
+        if type(exc).__name__ == "HttpBudgetExhaustedError":
+            raise
         discrepancy.append(f"verification_unavailable:{exc}")
         base_record["identity_verification_outcome"] = BIB_STATUS_UNKNOWN
         base_record["openalex_match"] = f"UNAVAILABLE ({exc})"

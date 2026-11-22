@@ -67,6 +67,9 @@ class _NoAutoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def _default_no_redirect_open(req: urllib.request.Request, timeout: float = 15.0):
+    # Respect unit tests that patch urllib.request.urlopen directly.
+    if getattr(urllib.request.urlopen, "__module__", "") != "urllib.request":
+        return urllib.request.urlopen(req, timeout=timeout)
     opener = urllib.request.build_opener(_NoAutoRedirect())
     return opener.open(req, timeout=timeout)
 
@@ -181,11 +184,12 @@ def fetch_openalex(
     *,
     tracker: HttpRequestTracker | None = None,
     max_retries: int = 0,
+    category: str = "search",
 ) -> list[dict[str, Any]]:
     params = urllib.parse.urlencode({"search": query, "per-page": str(per_page)})
     url = f"{OPENALEX_WORKS_URL}?{params}"
     if tracker is not None:
-        payload = tracker.get_json(url, timeout=timeout, category="search", max_retries=max_retries)
+        payload = tracker.get_json(url, timeout=timeout, category=category, max_retries=max_retries)
         return list(payload.get("results") or [])
     req = urllib.request.Request(
         url,
@@ -521,12 +525,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--iterative", action="store_true", help="Run bounded coverage-aware iterative discovery (Increment B)")
     parser.add_argument("--max-rounds", type=int, default=3, help="Maximum discovery rounds (default: 3)")
     parser.add_argument("--max-requests", type=int, default=12, help="Maximum search requests (default: 12)")
+    parser.add_argument(
+        "--max-http-requests",
+        type=int,
+        default=None,
+        help="Maximum observable HTTP attempts across search, verification, citation expansion, retries, and redirects",
+    )
     parser.add_argument("--citation-depth", type=int, default=1, help="Citation exploration depth (default: 1)")
     parser.add_argument("--no-review-first", action="store_true", help="Disable review-first discovery seed step")
     args = parser.parse_args(argv)
 
     if args.max_papers < 1 or args.max_rounds < 1 or args.max_requests < 1:
         print("ERROR: --max-papers, --max-rounds, and --max-requests must be >= 1", file=sys.stderr)
+        return 2
+    if args.max_http_requests is not None and args.max_http_requests < 1:
+        print("ERROR: --max-http-requests must be >= 1", file=sys.stderr)
         return 2
 
     if args.iterative:
@@ -547,14 +560,18 @@ def main(argv: list[str] | None = None) -> int:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 2
 
+        if args.max_http_requests is not None:
+            plan["limits"]["max_http_requests"] = args.max_http_requests
+
         search_fn = None
         citation_fn = fetch_openalex_citations if (args.fixture is None and args.citation_depth >= 1) else None
+        tracker = HttpRequestTracker(max_http_requests=args.max_http_requests) if args.fixture is None else None
         if args.fixture is not None:
             fx_data = json.loads(args.fixture.read_text(encoding="utf-8"))
             fx_list = list(fx_data.get("results", fx_data) if isinstance(fx_data, dict) else fx_data)
             search_fn = lambda q, n: fx_list[:n]
 
-        res = run_iterative_discovery(plan, search_fn=search_fn, citation_fn=citation_fn)
+        res = run_iterative_discovery(plan, search_fn=search_fn, citation_fn=citation_fn, tracker=tracker)
         out_dir = pathlib.Path(args.out_dir)
         disc_outs = write_discovery_artifacts(out_dir, res)
         accepted_recs = list(res["buckets"]["ACCEPTED_CORPUS"].values())
