@@ -26,6 +26,7 @@ def build_doctor_report() -> dict[str, object]:
     creds = {
         "OPENAI_API_KEY": bool(os.environ.get("OPENAI_API_KEY", "").strip()),
         "ANTHROPIC_API_KEY": bool(os.environ.get("ANTHROPIC_API_KEY", "").strip()),
+        "SEMANTIC_SCHOLAR_API_KEY": bool(os.environ.get("SEMANTIC_SCHOLAR_API_KEY", "").strip()),
         "GH_OR_GITHUB_TOKEN": bool(
             os.environ.get("GH_TOKEN", "").strip() or os.environ.get("GITHUB_TOKEN", "").strip()
         ),
@@ -40,6 +41,42 @@ def build_doctor_report() -> dict[str, object]:
             "available": "YES",
             "native_search": "YES (OpenAlex Works API)",
             "live_tested": "PREVIOUSLY_QUALIFIED (Linux)",
+        },
+        {
+            "name": "arxiv (tako sota --sources arxiv)",
+            "installed": "YES",
+            "configured": "YES (no key required)",
+            "authenticated": "NOT_REQUIRED",
+            "available": "YES",
+            "native_search": "YES (arXiv Atom API; 1 req/3s pacing)",
+            "live_tested": "FIXTURE_QUALIFIED",
+        },
+        {
+            "name": "crossref (tako sota --sources crossref)",
+            "installed": "YES",
+            "configured": "YES (polite pool via User-Agent/mailto)",
+            "authenticated": "NOT_REQUIRED",
+            "available": "YES",
+            "native_search": "YES (Crossref REST API)",
+            "live_tested": "FIXTURE_QUALIFIED",
+        },
+        {
+            "name": "semantic-scholar (tako sota --sources semantic-scholar)",
+            "installed": "YES",
+            "configured": "YES (optional SEMANTIC_SCHOLAR_API_KEY)",
+            "authenticated": "KEY_PRESENT_UNVERIFIED" if creds["SEMANTIC_SCHOLAR_API_KEY"] else "ANONYMOUS_SHARED_POOL",
+            "available": "YES",
+            "native_search": "YES (Semantic Scholar Graph API)",
+            "live_tested": "FIXTURE_QUALIFIED",
+        },
+        {
+            "name": "google-scholar-assisted",
+            "installed": "YES",
+            "configured": "MANUAL_ASSISTED_ONLY",
+            "authenticated": "UNSUPPORTED",
+            "available": "MANUAL_ONLY (assisted links + import; no scraping)",
+            "native_search": "NO (no official API)",
+            "live_tested": "FIXTURE_QUALIFIED",
         },
         {
             "name": "copilot-cli (tako sota-ai)",
@@ -112,9 +149,22 @@ def build_doctor_report() -> dict[str, object]:
     if not exes["claude"]:
         missing.append("claude executable not on PATH (required only for --provider claude-cli)")
 
+    from tools.researcher_setup import SetupConfigError, get_user_config_path, resolve_effective_discovery_settings
+
+    cfg_path = get_user_config_path()
+    try:
+        effective_cfg = resolve_effective_discovery_settings(config_path=cfg_path)
+    except SetupConfigError as exc:
+        effective_cfg = {"profile": f"INVALID ({exc})", "sources": [], "offline_only": False, "assistant": "none"}
+
     return {
         "python": py_ver,
         "os": f"{os_name} {os_rel} ({arch})",
+        "config_path": str(cfg_path),
+        "setup_profile": effective_cfg["profile"],
+        "effective_sources": effective_cfg["sources"],
+        "offline_only": effective_cfg["offline_only"],
+        "assistant": effective_cfg["assistant"],
         "executables": {k: bool(v) for k, v in exes.items()},
         "credentials_present": creds,
         "providers": providers,
@@ -128,6 +178,7 @@ def run_doctor() -> int:
     print(f"TAKO Doctor")
     print(f"Python: {report['python']}")
     print(f"OS:     {report['os']}")
+    print(f"Setup Profile: {report['setup_profile']} (config={report['config_path']}, sources={','.join(report['effective_sources'])}, assistant={report['assistant']}, offline_only={report['offline_only']})")
     print("Executables (on PATH): " + ", ".join(f"{k}={_bool_label(v)}" for k, v in report["executables"].items()))
     print("Credentials (boolean only): " + ", ".join(f"{k}={_bool_label(v)}" for k, v in report["credentials_present"].items()))
     print("\nProviders:")
