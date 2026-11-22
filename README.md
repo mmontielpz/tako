@@ -8,11 +8,12 @@
 
 # TAKO
 
-**From research questions to reproducible scientific knowledge.**
+**Your Research Environment, Research Mate & Scientific Ecosystem.**  
+*From research questions to reproducible scientific knowledge.*
 
-TAKO is an open-source, experimental **Agentic Research Development Environment (ARDE)** built for researchers and engineers who want bounded, traceable, evidence-grounded literature discovery and synthesis without sacrificing scientific integrity or local ownership.
+TAKO is evolving from a bounded scientific CLI toolkit into an open-source, local-first **Agentic Research Development Environment (ARDE)** built for researchers, scientists, professors, and graduate students who want evidence-grounded discovery and synthesis without sacrificing scientific integrity or local ownership.
 
-> **Status:** Experimental CLI (`v0.1.0a2`). Qualified natively on **CachyOS Linux** (Python `3.14`); CI-tested on **Ubuntu 24.04 LTS** (Python `3.9`–`3.14`, native Ubuntu desktop `NOT_TESTED`) and **Windows** (Python `3.12`). Native macOS is `NOT_TESTED`. TAKO Desktop is **planned** (`P7.0–P7.4`).
+> **Status:** Experimental CLI (`v0.1.0a2`). Qualified natively on **CachyOS Linux** (Python `3.14`); CI-tested on **Ubuntu 24.04 LTS** (Python `3.9`–`3.14`, native Ubuntu desktop `NOT_TESTED`) and **Windows** (Python `3.12`). Native macOS is `NOT_TESTED`. Desktop GUI (`P7`) and Research Ecosystem integrations (`P9`) are **planned**, not yet implemented.
 
 ---
 
@@ -135,8 +136,8 @@ See [Agent Starter Prompts](docs/AGENT_STARTER_PROMPTS.md) for copy-paste prompt
 
 ## Architecture & Roadmap
 
-- **Architecture Diagrams:** See [ARDE Architecture Diagrams](docs/architecture/ARDE_ARCHITECTURE_DIAGRAMS.md) (Workflow, Multi-Source Discovery, Evidence & Integrity, Assistant Integration, CLI/Desktop Boundary, Roadmap) and [Branding & Provenance](docs/assets/BRANDING_AND_PROVENANCE.md).
-- **Roadmap:** `P4` Closed (`v0.1.0a1`) → `P5` JetSeg Researcher Pilot (`CachyOS` CLI; `RX-001` native distribution `v0.1.0a2`) → `P6` Researcher Experience and Optimization → `P7.0–P7.4` TAKO Desktop (`LINUX_FIRST`: CachyOS then Ubuntu 24.04 LTS) → `P8` Research Ecosystem (Deferred). See [Roadmap](docs/product/ROADMAP.md) and [Current State](CURRENT_STATE.md).
+- **Product & Architecture Docs:** [Product Vision](docs/product/PRODUCT_VISION.md) · [Capability Map](docs/product/PRODUCT_CAPABILITY_MAP.md) · [Research Workflows](docs/product/RESEARCH_WORKFLOWS.md) · [ARDE Architecture](docs/architecture/ARDE_ARCHITECTURE.md) · [ARDE Diagrams](docs/architecture/ARDE_ARCHITECTURE_DIAGRAMS.md) · [Branding & Provenance](docs/assets/BRANDING_AND_PROVENANCE.md)
+- **Roadmap:** `P0–P4` Closed (`v0.1.0a2`) → `P5` Dogfooding (`M028C`–`M028D` complete) → `P6` Researcher Experience & Intelligence (`M029A`–`M029D`, next) → `P7` ARDE Desktop (`M029E`–`M029J`, `LINUX_FIRST`: CachyOS & Ubuntu 24.04 LTS) → `P8` JetSeg Research (`M030`) → `P9` Ecosystem → `P10` Qualification. See [Roadmap](docs/product/ROADMAP.md) and [Current State](CURRENT_STATE.md).
 
 ---
 
