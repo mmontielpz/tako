@@ -113,6 +113,10 @@ jobs:
           .\.ci-win-venv\Scripts\python.exe -m pip install --no-deps (Get-Item dist\*.whl).FullName
           $tako = ".\.ci-win-venv\Scripts\tako.exe"
           & $tako --version
+          & $tako setup --profile free --non-interactive
+          & $tako setup --show
+          & $tako providers list --json | Out-Null
+          if (-not (Test-Path (Join-Path $env:APPDATA "tako\config.json"))) { throw "Missing Windows APPDATA config.json" }
           & $tako doctor
           $ws = Join-Path $env:RUNNER_TEMP "study α space"
           $fx = Join-Path $env:RUNNER_TEMP "fx_win.json"

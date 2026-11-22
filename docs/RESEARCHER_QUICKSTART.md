@@ -1,47 +1,78 @@
-# TAKO Researcher Quickstart (Windows & Linux)
+# TAKO Researcher Quickstart (Windows & Ubuntu)
 
-## 1. Prerequisites
-- Python 3.9–3.14 (`python --version` or `py -3 --version` on Windows).
-- Zero external Python dependencies required (`--no-deps` wheel install).
+## 1. Prerequisites & Platform Compatibility
+- **Minimum Supported Python:** Python `>= 3.9` (per `pyproject.toml`).
+- **CI-Tested Matrix:** Ubuntu Linux (Python `3.9`, `3.12`, `3.13`, `3.14`) and Windows (Python `3.12`). Native macOS is `NOT_TESTED`.
+- **Dependencies:** Zero external Python dependencies required (`--no-deps` wheel install inside an isolated virtual environment to avoid system Python / PEP 668 conflicts).
 
-## 2. Install TAKO
+## 2. Install TAKO in a Virtual Environment
+
+### Windows (PowerShell)
 ```powershell
-# Windows (PowerShell)
-python -m pip install --no-deps tako_researcher_preview-0.0.1.dev10-py3-none-any.whl
-tako --version
+python -m venv .tako-venv
+.\.tako-venv\Scripts\python.exe -m pip install --no-deps tako_researcher_preview-0.0.1.dev10-py3-none-any.whl
+.\.tako-venv\Scripts\tako.exe --version
 ```
+
+### Ubuntu / Linux
 ```bash
-# Linux / macOS
-python3 -m pip install --no-deps tako_researcher_preview-0.0.1.dev10-py3-none-any.whl
-tako --version
+python3 -m venv .tako-venv
+.tako-venv/bin/pip install --no-deps tako_researcher_preview-0.0.1.dev10-py3-none-any.whl
+.tako-venv/bin/tako --version
 ```
+
+*(Activate `.tako-venv` or prefix commands with `.\.tako-venv\Scripts\tako.exe` on Windows / `.tako-venv/bin/tako` on Ubuntu.)*
 
 ## 3. Configure Your Research Profile
 ```bash
 # Interactive wizard (recommended default: free)
 tako setup
 
-# Non-interactive Free profile
+# Or non-interactive Free profile
 tako setup --profile free --non-interactive
 
-# Inspect active config and provider checklist
+# Inspect active config, provider checklist, and readiness
 tako setup --show
 tako providers list
 tako doctor
 ```
 
-## 4. Run Your First Research Workspace
+## 4. Initialize a Research Workspace
 ```bash
-tako init --workspace ./my_research --topic "Graph Neural Networks for Molecular Property Prediction" --objective "Survey foundational methods and limitations"
+tako init --workspace ./my_research \
+  --topic "Graph Neural Networks for Molecular Property Prediction" \
+  --objective "Identify foundational message-passing methods, molecular property prediction architectures and reported methodological limitations"
+```
 
-# Offline verification (no network calls)
-tako sota-ai --topic "Graph Neural Networks for Molecular Property Prediction" --objective "Survey foundational methods and limitations" --provider fixture --out-dir ./my_research/ai_out
+## 5. Run Discovery & Export
 
-# Or bounded live open-access discovery (when ready for network access)
-tako sota --topic "Graph Neural Networks for Molecular Property Prediction" --objective "Survey foundational methods and limitations" --iterative --sources openalex,arxiv,crossref --max-papers 10 --max-rounds 2 --max-requests 4 --max-http-requests 12 --out-dir ./my_research/sota_out
+### Path A — Offline Verification Workflow (`ai_out`, zero network calls)
+```bash
+tako sota-ai \
+  --topic "Graph Neural Networks for Molecular Property Prediction" \
+  --objective "Identify foundational message-passing methods, molecular property prediction architectures and reported methodological limitations" \
+  --provider fixture \
+  --out-dir ./my_research/ai_out
 
-# Evidence & export
-tako evidence --workspace ./my_research --from-workflow-dir ./my_research/sota_out --out-dir ./my_research/evidence_out
+tako evidence --workspace ./my_research --from-workflow-dir ./my_research/ai_out --out-dir ./my_research/evidence_ai
 tako status --workspace ./my_research
-tako export --workspace ./my_research --out-dir ./my_research/export_out --format all
+tako export --workspace ./my_research --out-dir ./my_research/export_ai --format all
+```
+
+### Path B — Bounded Live Open-Access Discovery Workflow (`sota_out`)
+```bash
+tako sota \
+  --topic "Graph Neural Networks for Molecular Property Prediction" \
+  --objective "Identify foundational message-passing methods, molecular property prediction architectures and reported methodological limitations" \
+  --iterative \
+  --sources openalex,arxiv,crossref \
+  --max-papers 10 \
+  --max-rounds 2 \
+  --max-requests 4 \
+  --max-http-requests 16 \
+  --out-dir ./my_research/sota_out
+
+tako evidence --workspace ./my_research --from-workflow-dir ./my_research/sota_out --out-dir ./my_research/evidence_sota
+tako status --workspace ./my_research
+tako export --workspace ./my_research --out-dir ./my_research/export_sota --format all
 ```
