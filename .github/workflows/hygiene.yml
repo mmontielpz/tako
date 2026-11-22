@@ -64,6 +64,7 @@ jobs:
         run: |
           python -m venv .ci-venv
           .ci-venv/bin/pip install --no-deps dist/*.whl
+          .ci-venv/bin/tako --version
           .ci-venv/bin/tako --help
           .ci-venv/bin/tako doctor
           .ci-venv/bin/tako sota-ai \
@@ -74,7 +75,8 @@ jobs:
             --out-dir /tmp/tako-ci-fixture-out
           test -s /tmp/tako-ci-fixture-out/sota_report.md
           test -s /tmp/tako-ci-fixture-out/literature_matrix.csv
-          test -s /tmp/tako-ci-fixture-out/references.bib
+          test -f /tmp/tako-ci-fixture-out/references.bib
+          test -s /tmp/tako-ci-fixture-out/references_candidates.bib
           test -s /tmp/tako-ci-fixture-out/review_report.md
 
   engine:
