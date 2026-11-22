@@ -6,16 +6,15 @@ fail=0
 err() { echo "FAIL: $*"; fail=1; }
 
 # 1. Required files
-for f in README.md AGENTS.md CLAUDE.md CONTRIBUTING.md CODE_OF_CONDUCT.md SECURITY.md \
-         CURRENT_STATE.md .gitignore .github/PULL_REQUEST_TEMPLATE.md \
+for f in README.md AGENTS.md CLAUDE.md CONTRIBUTING.md CODE_OF_CONDUCT.md SECURITY.md CHANGELOG.md \
+         CURRENT_STATE.md .gitignore .github/PULL_REQUEST_TEMPLATE.md pyproject.toml \
+         tools/cli.py tools/doctor.py tools/sota_discovery/sota.py tools/sota_ai_native/workflow.py \
          docs/product/PRODUCT_VISION.md docs/product/MVP_SCOPE.md \
          docs/architecture/ARCHITECTURE_PRINCIPLES.md docs/architecture/OPEN_SOURCE_BOUNDARY.md \
-         docs/decisions/0001-license.md docs/missions/TAKO-002/SPEC.md LICENSE NOTICE \
+         docs/decisions/0001-license.md LICENSE NOTICE \
          docs/architecture/DESKTOP_STACK_DECISION.md docs/architecture/CORE_CONTRACTS.md docs/architecture/FIRST_WORKFLOW.md \
          docs/product/UX_SPEC.md docs/product/COMPANION_SPEC.md docs/product/DESIGN_SYSTEM.md docs/product/ROADMAP.md \
-         docs/missions/TAKO-001B/REPORT.md docs/missions/TAKO-003/SPEC.md \
-         docs/missions/TAKO-003/REPORT.md docs/missions/TAKO-003H/REPORT.md \
-         docs/architecture/SECURITY_LIMITATIONS.md docs/architecture/ISOLATION_DECISION.md docs/missions/TAKO-004/READINESS.md docs/missions/TAKO-004/REPORT.md docs/missions/TAKO-004B/REPORT.md docs/missions/TAKO-004B/review/README.md docs/missions/TAKO-005/READINESS.md \
+         docs/architecture/SECURITY_LIMITATIONS.md docs/architecture/ISOLATION_DECISION.md \
          bridge/src/lib.rs bridge/tests/bridge.rs ui/package.json ui/package-lock.json ui/src/App.tsx ui/src/companion.ts \
          src-tauri/tauri.conf.json src-tauri/src/main.rs src-tauri/capabilities/default.json Cargo.toml Cargo.lock src/lib.rs tests/engine.rs; do
   [ -f "$f" ] || err "missing $f"

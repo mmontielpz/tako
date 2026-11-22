@@ -59,4 +59,4 @@ Implemented in `ui/` and tested against the real engine in a DOM emulator (never
 
 ## Review against the running application (TAKO-004B)
 
-Reviewed on the real desktop app; findings and fixes are in the [TAKO-004B report](../missions/TAKO-004B/REPORT.md) and [screenshots](../missions/TAKO-004B/review/README.md). Changes made to the layout rule: the card that holds the current primary action is shown first; earlier stages (the plan) move below later results; the decision card carries an evidence summary next to Accept/Reject.
+Reviewed on the real desktop app; findings and fixes are recorded in `docs/missions/TAKO-004B/REPORT.md` and `docs/missions/TAKO-004B/review/README.md` (internal archive, excluded from public repo). Changes made to the layout rule: the card that holds the current primary action is shown first; earlier stages (the plan) move below later results; the decision card carries an evidence summary next to Accept/Reject.

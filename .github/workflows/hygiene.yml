@@ -3,7 +3,7 @@ name: hygiene
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, develop, experiment/researcher-preview]
 
 permissions:
   contents: read
@@ -15,12 +15,71 @@ jobs:
       - uses: actions/checkout@v4
       - name: Repository hygiene checks
         run: bash scripts/check.sh
+
+  python-cli:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run deterministic Python CLI regression tests (nonzero verified)
+        run: |
+          python - <<'PY'
+          import subprocess, sys
+
+          suites = [
+              ("tests/sota_discovery", 5),
+              ("tests/sota_ai_native", 11),
+          ]
+          for suite, min_expected in suites:
+              proc = subprocess.run(
+                  [sys.executable, "-m", "unittest", "discover", "-s", suite, "-v"],
+                  capture_output=True,
+                  text=True,
+              )
+              print(proc.stdout)
+              print(proc.stderr, file=sys.stderr)
+              if proc.returncode != 0:
+                  raise SystemExit(proc.returncode)
+              combined = proc.stdout + "\n" + proc.stderr
+              if "Ran 0 tests" in combined or "NO TESTS RAN" in combined:
+                  raise SystemExit(f"Zero tests ran for {suite}")
+          PY
+      - name: Build wheel and generate SHA-256 checksum
+        run: |
+          python -m pip install --upgrade pip wheel
+          python -m pip wheel --no-deps . -w dist/
+          sha256sum dist/*.whl > dist/SHA256SUMS.txt
+          cat dist/SHA256SUMS.txt
+      - name: Install wheel in fresh isolated venv and run offline CLI smoke workflow
+        run: |
+          python -m venv .ci-venv
+          .ci-venv/bin/pip install --no-deps dist/*.whl
+          .ci-venv/bin/tako --help
+          .ci-venv/bin/tako doctor
+          .ci-venv/bin/tako sota-ai \
+            --topic "Agentic research development environments" \
+            --objective "Verify offline fixture workflow in CI" \
+            --provider fixture \
+            --with-reviewer \
+            --out-dir /tmp/tako-ci-fixture-out
+          test -s /tmp/tako-ci-fixture-out/sota_report.md
+          test -s /tmp/tako-ci-fixture-out/literature_matrix.csv
+          test -s /tmp/tako-ci-fixture-out/references.bib
+          test -s /tmp/tako-ci-fixture-out/review_report.md
+
   engine:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Build and test engine
         run: cargo test --workspace --locked
+
   ui:
     runs-on: ubuntu-latest
     steps:
@@ -35,6 +94,7 @@ jobs:
           npm run typecheck
           npm test
           npm run build
+
   desktop-shell:
     # Compiled and launched locally (TAKO-004B); this job has never run on GitHub, hence continue-on-error.
     runs-on: ubuntu-latest
