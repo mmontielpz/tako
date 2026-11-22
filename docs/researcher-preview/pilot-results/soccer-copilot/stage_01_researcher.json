@@ -1,0 +1,224 @@
+{
+  "elapsed_seconds": 78.146,
+  "usage": {
+    "input_tokens": "UNKNOWN",
+    "output_tokens": "UNKNOWN",
+    "cost_usd": "premium_requests:1"
+  },
+  "payload": {
+    "related_topics": [
+      "Goal-scoring models and scoreline distributions",
+      "League-table forecasting, team ratings, and betting-market efficiency",
+      "Machine learning for match-outcome prediction",
+      "Expected goals and shot-quality estimation",
+      "Player and team action valuation",
+      "Event and positional data, tracking, and tactical analysis",
+      "Possession, match context, and performance indicators",
+      "Prediction calibration, uncertainty, and out-of-sample evaluation",
+      "How analytics inform coaching and match decisions",
+      "Limits of observational data and the distinction between prediction and causation"
+    ],
+    "papers": [
+      {
+        "Title": "Modelling association football scores",
+        "Authors": "Maher, Michael J.",
+        "Year": 1982,
+        "Publication venue": "Statistica Neerlandica",
+        "DOI or source URL": "https://doi.org/10.1111/j.1467-9574.1982.tb00782.x",
+        "Relevance rationale": "Foundational modelling of team scoring strengths and match scores; a basis for later probabilistic score and outcome forecasts.",
+        "Seminal work candidate": true,
+        "Evidence level": "MODEL_RECALL"
+      },
+      {
+        "Title": "Modelling association football scores and inefficiencies in the football betting market",
+        "Authors": "Dixon, Mark J.; Coles, Stuart G.",
+        "Year": 1997,
+        "Publication venue": "Journal of the Royal Statistical Society: Series C (Applied Statistics)",
+        "DOI or source URL": "https://doi.org/10.1111/1467-9876.00065",
+        "Relevance rationale": "Introduced a influential dynamic score model and examined the relationship between statistical forecasts and betting-market prices.",
+        "Seminal work candidate": true,
+        "Evidence level": "MODEL_RECALL"
+      },
+      {
+        "Title": "Prediction and retrospective analysis of soccer matches in a league",
+        "Authors": "Rue, Håvard; Salvesen, Øivind",
+        "Year": 2000,
+        "Publication venue": "Journal of the Royal Statistical Society: Series D (The Statistician)",
+        "DOI or source URL": "https://doi.org/10.1111/1467-9884.00243",
+        "Relevance rationale": "Developed a dynamic Bayesian framework for team abilities and match forecasts, linking changing form to score prediction.",
+        "Seminal work candidate": true,
+        "Evidence level": "MODEL_RECALL"
+      },
+      {
+        "Title": "Analysis of sports data by using bivariate Poisson models",
+        "Authors": "Karlis, Dimitris; Ntzoufras, Ioannis",
+        "Year": 2003,
+        "Publication venue": "Journal of the Royal Statistical Society: Series D (The Statistician)",
+        "DOI or source URL": "https://doi.org/10.1111/1467-9884.00366",
+        "Relevance rationale": "Shows how correlated team goal counts can be modelled jointly, improving probabilistic treatment of match scores.",
+        "Seminal work candidate": true,
+        "Evidence level": "MODEL_RECALL"
+      },
+      {
+        "Title": "Regression models for forecasting goals and match results in association football",
+        "Authors": "Goddard, John",
+        "Year": 2005,
+        "Publication venue": "International Journal of Forecasting",
+        "DOI or source URL": "https://doi.org/10.1016/j.ijforecast.2004.08.002",
+        "Relevance rationale": "Evaluates regression approaches to forecasting goals and outcomes, providing a useful bridge between score modelling and practical prediction.",
+        "Seminal work candidate": true,
+        "Evidence level": "MODEL_RECALL"
+      },
+      {
+        "Title": "A Bayesian hierarchical model for the prediction of football results",
+        "Authors": "Baio, Gianluca; Blangiardo, Marta",
+        "Year": 2010,
+        "Publication venue": "Journal of Applied Statistics",
+        "DOI or source URL": "https://doi.org/10.1080/02664760802684177",
+        "Relevance rationale": "Uses hierarchical team effects to produce probabilistic forecasts and illustrates partial pooling across teams.",
+        "Seminal work candidate": true,
+        "Evidence level": "MODEL_RECALL"
+      },
+      {
+        "Title": "Using ELO ratings for match result prediction in association football",
+        "Authors": "Hvattum, Lars Magnus; Arntzen, Halvard",
+        "Year": 2010,
+        "Publication venue": "International Journal of Forecasting",
+        "DOI or source URL": "https://doi.org/10.1016/j.ijforecast.2009.10.002",
+        "Relevance rationale": "Tests rating-based measures of team strength as predictors of match results and compares their forecasting value with other information.",
+        "Seminal work candidate": true,
+        "Evidence level": "MODEL_RECALL"
+      },
+      {
+        "Title": "pi-football: A Bayesian network model for forecasting association football match results",
+        "Authors": "Constantinou, Michael A.; Fenton, Norman E.; Neil, Martin",
+        "Year": 2012,
+        "Publication venue": "International Journal of Forecasting",
+        "DOI or source URL": "https://doi.org/10.1016/j.ijforecast.2011.10.003",
+        "Relevance rationale": "Combines football knowledge and statistical evidence in a Bayesian network to estimate match-result probabilities.",
+        "Seminal work candidate": false,
+        "Evidence level": "MODEL_RECALL"
+      },
+      {
+        "Title": "A dynamic bivariate Poisson model for analysing and forecasting match results in the English Premier League",
+        "Authors": "Koopman, Siem Jan; Lit, Rutger",
+        "Year": 2015,
+        "Publication venue": "Journal of the Royal Statistical Society: Series A (Statistics in Society)",
+        "DOI or source URL": "https://doi.org/10.1111/rssa.12042",
+        "Relevance rationale": "Extends goal-based forecasting with time-varying team strengths and joint score modelling, directly addressing changing performance over a season.",
+        "Seminal work candidate": false,
+        "Evidence level": "MODEL_RECALL"
+      },
+      {
+        "Title": "Prediction of the FIFA World Cup 2014 – A random forest approach with an emphasis on chosen team composition",
+        "Authors": "Groll, Andreas; Schauberger, Gunther; Tutz, Gerhard",
+        "Year": 2015,
+        "Publication venue": "Journal of Sports Analytics",
+        "DOI or source URL": "https://doi.org/10.3233/JSA-150006",
+        "Relevance rationale": "Applies machine learning to tournament forecasting and investigates whether team composition contributes useful predictive information.",
+        "Seminal work candidate": false,
+        "Evidence level": "MODEL_RECALL"
+      },
+      {
+        "Title": "A machine learning framework for sport result prediction",
+        "Authors": "Bunker, Rory P.; Thabtah, Fadi",
+        "Year": 2019,
+        "Publication venue": "Applied Computing and Informatics",
+        "DOI or source URL": "https://doi.org/10.1016/j.aci.2017.09.005",
+        "Relevance rationale": "Reviews and applies machine-learning approaches to sports-result prediction, helping situate football forecasting among broader modelling methods.",
+        "Seminal work candidate": false,
+        "Evidence level": "MODEL_RECALL"
+      },
+      {
+        "Title": "Performance analysis in football: A critical review and implications for future research",
+        "Authors": "Mackenzie, Robert; Cushion, Christopher",
+        "Year": 2013,
+        "Publication venue": "Journal of Sports Sciences",
+        "DOI or source URL": "https://doi.org/10.1080/02640414.2012.746720",
+        "Relevance rationale": "Critically reviews football performance-analysis methods and their limitations, including the challenge of translating observed indicators into actionable insight.",
+        "Seminal work candidate": true,
+        "Evidence level": "MODEL_RECALL"
+      },
+      {
+        "Title": "Match analysis in football: a systematic review",
+        "Authors": "Sarmento, Hugo; Marcelino, Rui; Anguera, M. Teresa; Campaniço, Jorge; Matos, Nuno; Leitão, José",
+        "Year": 2014,
+        "Publication venue": "Journal of Sports Sciences",
+        "DOI or source URL": "https://doi.org/10.1080/02640414.2014.898852",
+        "Relevance rationale": "Synthesizes match-analysis research and its variables and methods, useful for understanding what performance measures can and cannot explain.",
+        "Seminal work candidate": false,
+        "Evidence level": "MODEL_RECALL"
+      },
+      {
+        "Title": "Game-related statistics that discriminated winning, drawing and losing teams from the Spanish soccer league",
+        "Authors": "Lago-Peñas, Carlos; Lago-Ballesteros, Joaquín; Dellal, Alexandre; Gómez, Miguel Ángel",
+        "Year": 2010,
+        "Publication venue": "Journal of Sports Sciences",
+        "DOI or source URL": "https://doi.org/10.1080/0264041090358101",
+        "Relevance rationale": "Examines which match statistics distinguish outcomes in league play, illustrating how indicators relate to results while remaining sensitive to context.",
+        "Seminal work candidate": false,
+        "Evidence level": "MODEL_RECALL"
+      },
+      {
+        "Title": "Big data and tactical analysis in elite soccer: future challenges and opportunities for sports science",
+        "Authors": "Rein, Robert; Memmert, Daniel",
+        "Year": 2016,
+        "Publication venue": "SpringerPlus",
+        "DOI or source URL": "https://doi.org/10.1186/s40064-016-3108-2",
+        "Relevance rationale": "Discusses the opportunities and practical limits of using large-scale data for tactical analysis and decision support in elite football.",
+        "Seminal work candidate": false,
+        "Evidence level": "MODEL_RECALL"
+      },
+      {
+        "Title": "Data analytics in football: positional data collection, modelling and analysis",
+        "Authors": "Memmert, Daniel; Lemmink, K. A. P. M.; Sampaio, Jaime",
+        "Year": 2017,
+        "Publication venue": "Sports Medicine",
+        "DOI or source URL": "https://doi.org/10.1007/s40279-016-0664-6",
+        "Relevance rationale": "Reviews positional-data collection and analytical methods, connecting tracking data to tactical questions and performance assessment.",
+        "Seminal work candidate": false,
+        "Evidence level": "MODEL_RECALL"
+      },
+      {
+        "Title": "Spatio-temporal analysis of team sports",
+        "Authors": "Gudmundsson, Joachim; Horton, Michael",
+        "Year": 2017,
+        "Publication venue": "ACM Computing Surveys",
+        "DOI or source URL": "https://doi.org/10.1145/3054132",
+        "Relevance rationale": "Surveys computational approaches to spatial and temporal team-sport data, including methods relevant to football movement and tactics.",
+        "Seminal work candidate": false,
+        "Evidence level": "MODEL_RECALL"
+      },
+      {
+        "Title": "A public data set of spatio-temporal match events in soccer competitions",
+        "Authors": "Pappalardo, Luca; Cintia, Paolo; Ferragina, Paolo; Massucco, Emanuele; Pedreschi, Diego; Giannotti, Fosca",
+        "Year": 2019,
+        "Publication venue": "Scientific Data",
+        "DOI or source URL": "https://doi.org/10.1038/sdata.2019.236",
+        "Relevance rationale": "Describes an open event-data resource that supports reproducible analysis of match events, player actions, and team performance.",
+        "Seminal work candidate": false,
+        "Evidence level": "MODEL_RECALL"
+      },
+      {
+        "Title": "Actions Speak Louder Than Goals: Valuing Player Actions in Soccer",
+        "Authors": "Decroos, Tom; Bransen, Lotte; Van Haaren, Jan; Davis, Jesse",
+        "Year": 2019,
+        "Publication venue": "Proceedings of the 25th ACM SIGKDD International Conference on Knowledge Discovery & Data Mining",
+        "DOI or source URL": "https://doi.org/10.1145/3292500.3330758",
+        "Relevance rationale": "Introduces VAEP, a framework for valuing actions by their change in the probability of scoring or conceding, extending analysis beyond goals and assists.",
+        "Seminal work candidate": true,
+        "Evidence level": "MODEL_RECALL"
+      },
+      {
+        "Title": "A goal scoring probability model for shots based on players' abilities in soccer",
+        "Authors": "Anzer, Gregor; Bauer, Peter",
+        "Year": 2021,
+        "Publication venue": "PLOS ONE",
+        "DOI or source URL": "https://doi.org/10.1371/journal.pone.0255518",
+        "Relevance rationale": "Models shot-level scoring probability while incorporating player ability, relevant to expected-goals estimation and separating chance quality from finishing outcomes.",
+        "Seminal work candidate": false,
+        "Evidence level": "MODEL_RECALL"
+      }
+    ]
+  }
+}

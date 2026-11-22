@@ -1,0 +1,128 @@
+{
+  "elapsed_seconds": 51.062,
+  "usage": {
+    "input_tokens": "UNKNOWN",
+    "output_tokens": "UNKNOWN",
+    "cost_usd": "premium_requests:1"
+  },
+  "payload": {
+    "related_topics": [
+      "Reservoir computing",
+      "Echo state networks",
+      "Liquid state machines",
+      "Quantum reservoir computing",
+      "Quantum neuromorphic computing",
+      "Dynamical systems",
+      "Time-series prediction",
+      "Temporal information processing",
+      "Information processing capacity",
+      "Quantum extreme learning",
+      "Spatial multiplexing",
+      "Higher-order memory",
+      "Noisy intermediate-scale quantum devices",
+      "Continuous-variable quantum systems"
+    ],
+    "papers": [
+      {
+        "Title": "The \"Echo State\" Approach to Analysing and Training Recurrent Neural Networks",
+        "Authors": "Herbert Jaeger",
+        "Year": 2001,
+        "Publication venue": "GMD Report 148, German National Research Center for Information Technology",
+        "DOI or source URL": "https://doi.org/10.13140/RG.2.1.4428.0645",
+        "Relevance rationale": "Introduced echo state networks and the separation of a fixed recurrent reservoir from a trainable linear output layer, establishing the central classical reservoir-computing principle.",
+        "Seminal work candidate": true,
+        "Evidence level": "MODEL_RECALL"
+      },
+      {
+        "Title": "Real-Time Computing Without Stable States: A New Framework for Neural Computation Based on Perturbations",
+        "Authors": "Wolfgang Maass; Thomas Natschläger; Henry Markram",
+        "Year": 2002,
+        "Publication venue": "Neural Computation",
+        "DOI or source URL": "https://doi.org/10.1162/089976602760407955",
+        "Relevance rationale": "Introduced liquid state machines, showing that a sufficiently rich fixed excitable dynamical system can provide real-time high-dimensional representations for task-specific readout.",
+        "Seminal work candidate": true,
+        "Evidence level": "MODEL_RECALL"
+      },
+      {
+        "Title": "Harnessing Disordered-Ensemble Quantum Dynamics for Machine Learning",
+        "Authors": "Keisuke Fujii; Kohei Nakajima",
+        "Year": 2017,
+        "Publication venue": "Physical Review Applied",
+        "DOI or source URL": "https://doi.org/10.1103/PhysRevApplied.8.024030",
+        "Relevance rationale": "The foundational quantum reservoir-computing proposal; it used dissipative spin-network dynamics and showed that fixed quantum dynamics can create features for linear temporal tasks.",
+        "Seminal work candidate": true,
+        "Evidence level": "MODEL_RECALL"
+      },
+      {
+        "Title": "Quantum Reservoir Processing",
+        "Authors": "Sanjib Ghosh; Andrzej Opala; Michał Matuszewski; Tomasz Paterek; Timothy C. H. Liew",
+        "Year": 2019,
+        "Publication venue": "npj Quantum Information",
+        "DOI or source URL": "https://doi.org/10.1038/s41534-019-0174-1",
+        "Relevance rationale": "Demonstrated quantum reservoir processing for pattern classification and related tasks, emphasizing that the reservoir can perform feature transformation while only the output layer is trained.",
+        "Seminal work candidate": true,
+        "Evidence level": "MODEL_RECALL"
+      },
+      {
+        "Title": "Boosting Computational Power through Spatial Multiplexing in Quantum Reservoir Computing",
+        "Authors": "Kohei Nakajima; Keisuke Fujii; Makoto Negoro; Kazuaki Mitarai; Masahiro Kitagawa",
+        "Year": 2019,
+        "Publication venue": "Physical Review Applied",
+        "DOI or source URL": "https://doi.org/10.1103/PhysRevApplied.11.034021",
+        "Relevance rationale": "Introduced spatial multiplexing for quantum reservoirs and showed how combining multiple distinct quantum subsystems or input placements can improve memory and nonlinear processing.",
+        "Seminal work candidate": false,
+        "Evidence level": "MODEL_RECALL"
+      },
+      {
+        "Title": "Optimizing a Quantum Reservoir Computer for Time Series Prediction",
+        "Authors": "Aki Kutvonen; Keisuke Fujii; Takahiro Sagawa",
+        "Year": 2020,
+        "Publication venue": "Scientific Reports",
+        "DOI or source URL": "https://doi.org/10.1038/s41598-020-71673-9",
+        "Relevance rationale": "Examined design and parameter optimization for quantum reservoirs on time-series prediction tasks, including tradeoffs among system dynamics, memory, and prediction accuracy.",
+        "Seminal work candidate": false,
+        "Evidence level": "MODEL_RECALL"
+      },
+      {
+        "Title": "Temporal Information Processing on Noisy Quantum Computers",
+        "Authors": "Hsin-Yuan Chen; Hendra I. Nurdin; Naoki Yamamoto",
+        "Year": 2020,
+        "Publication venue": "Physical Review Applied",
+        "DOI or source URL": "https://doi.org/10.1103/PhysRevApplied.14.024065",
+        "Relevance rationale": "Developed a framework for temporal tasks on noisy gate-based quantum hardware and identified practical effects of finite measurements, noise, and device limitations.",
+        "Seminal work candidate": false,
+        "Evidence level": "MODEL_RECALL"
+      },
+      {
+        "Title": "Opportunities in Quantum Reservoir Computing and Extreme Learning Machines",
+        "Authors": "Pere Mujal; Rodrigo Martínez-Peña; Johannes Nokkala; Jorge García-Baldó; Roberta Zambrini; Miguel C. Soriano",
+        "Year": 2021,
+        "Publication venue": "Advanced Quantum Technologies",
+        "DOI or source URL": "https://doi.org/10.1002/qute.202100094",
+        "Relevance rationale": "A major methodological and conceptual review connecting quantum reservoir computing with extreme learning machines, outlining experimental platforms, memory, scalability, readout, and noise limitations.",
+        "Seminal work candidate": false,
+        "Evidence level": "abstract-based"
+      },
+      {
+        "Title": "Gaussian States of Continuous-Variable Quantum Systems Provide Universal Quantum Reservoir Computing",
+        "Authors": "Johannes Nokkala; Rodrigo Martínez-Peña; Gianluca Giorgi; Valentina Parigi; Miguel C. Soriano; Roberta Zambrini",
+        "Year": 2021,
+        "Publication venue": "Communications Physics",
+        "DOI or source URL": "https://doi.org/10.1038/s42005-021-00556-w",
+        "Relevance rationale": "Established universality results for continuous-variable Gaussian reservoirs and showed how accessible observables and nonlinear features support a broad class of temporal transformations.",
+        "Seminal work candidate": false,
+        "Evidence level": "MODEL_RECALL"
+      },
+      {
+        "Title": "Higher-Order Quantum Reservoir Computing",
+        "Authors": "Huan Yang Tran; Kohei Nakajima",
+        "Year": 2021,
+        "Publication venue": "Physical Review Letters",
+        "DOI or source URL": "https://doi.org/10.1103/PhysRevLett.127.260401",
+        "Relevance rationale": "Extended quantum reservoir representations through higher-order tensor products of reservoir observables, expanding nonlinear expressivity and temporal feature space.",
+        "Seminal work candidate": false,
+        "Evidence level": "MODEL_RECALL"
+      }
+    ]
+  }
+}

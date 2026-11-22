@@ -1,0 +1,182 @@
+[
+  {
+    "Title": "Modelling association football scores",
+    "returned_year": 1982,
+    "url": "https://doi.org/10.1111/j.1467-9574.1982.tb00782.x",
+    "oa_title": "Modelling association football scores",
+    "oa_year": 1982,
+    "oa_doi": "https://doi.org/10.1111/j.1467-9574.1982.tb00782.x",
+    "openalex_match": "VERIFIED"
+  },
+  {
+    "Title": "Modelling association football scores and inefficiencies in the football betting market",
+    "returned_year": 1997,
+    "url": "https://doi.org/10.1111/1467-9876.00065",
+    "oa_title": "Modelling Association Football Scores and Inefficiencies in the Football Betting Market",
+    "oa_year": 1997,
+    "oa_doi": "https://doi.org/10.1111/1467-9876.00065",
+    "openalex_match": "VERIFIED"
+  },
+  {
+    "Title": "Prediction and retrospective analysis of soccer matches in a league",
+    "returned_year": 2000,
+    "url": "https://doi.org/10.1111/1467-9884.00243",
+    "oa_title": "Prediction and Retrospective Analysis of Soccer Matches in a League",
+    "oa_year": 2000,
+    "oa_doi": "https://doi.org/10.1111/1467-9884.00243",
+    "openalex_match": "VERIFIED"
+  },
+  {
+    "Title": "Analysis of sports data by using bivariate Poisson models",
+    "returned_year": 2003,
+    "url": "https://doi.org/10.1111/1467-9884.00366",
+    "oa_title": "Analysis of sports data by using bivariate Poisson models",
+    "oa_year": 2003,
+    "oa_doi": "https://doi.org/10.1111/1467-9884.00366",
+    "openalex_match": "VERIFIED"
+  },
+  {
+    "Title": "Regression models for forecasting goals and match results in association football",
+    "returned_year": 2005,
+    "url": "https://doi.org/10.1016/j.ijforecast.2004.08.002",
+    "oa_title": "Regression models for forecasting goals and match results in association football",
+    "oa_year": 2004,
+    "oa_doi": "https://doi.org/10.1016/j.ijforecast.2004.08.002",
+    "openalex_match": "MISMATCH"
+  },
+  {
+    "Title": "A Bayesian hierarchical model for the prediction of football results",
+    "returned_year": 2010,
+    "url": "https://doi.org/10.1080/02664760802684177",
+    "oa_title": "Bayesian hierarchical model for the prediction of football results",
+    "oa_year": 2010,
+    "oa_doi": "https://doi.org/10.1080/02664760802684177",
+    "openalex_match": "VERIFIED"
+  },
+  {
+    "Title": "Using ELO ratings for match result prediction in association football",
+    "returned_year": 2010,
+    "url": "https://doi.org/10.1016/j.ijforecast.2009.10.002",
+    "oa_title": "Using ELO ratings for match result prediction in association football",
+    "oa_year": 2009,
+    "oa_doi": "https://doi.org/10.1016/j.ijforecast.2009.10.002",
+    "openalex_match": "MISMATCH"
+  },
+  {
+    "Title": "pi-football: A Bayesian network model for forecasting association football match results",
+    "returned_year": 2012,
+    "url": "https://doi.org/10.1016/j.ijforecast.2011.10.003",
+    "oa_title": "Forecasting football matches by predicting match statistics",
+    "oa_year": 2021,
+    "oa_doi": "https://doi.org/10.3233/jsa-200462",
+    "openalex_match": "MISMATCH"
+  },
+  {
+    "Title": "A dynamic bivariate Poisson model for analysing and forecasting match results in the English Premier League",
+    "returned_year": 2015,
+    "url": "https://doi.org/10.1111/rssa.12042",
+    "oa_title": "A Dynamic Bivariate Poisson Model for Analysing and Forecasting Match Results in the English Premier League",
+    "oa_year": 2013,
+    "oa_doi": "https://doi.org/10.1111/rssa.12042",
+    "openalex_match": "MISMATCH"
+  },
+  {
+    "Title": "Prediction of the FIFA World Cup 2014 – A random forest approach with an emphasis on chosen team composition",
+    "returned_year": 2015,
+    "url": "https://doi.org/10.3233/JSA-150006",
+    "oa_title": "Editorial",
+    "oa_year": 2015,
+    "oa_doi": "https://doi.org/10.3233/jsa-150006",
+    "openalex_match": "MISMATCH"
+  },
+  {
+    "Title": "A machine learning framework for sport result prediction",
+    "returned_year": 2019,
+    "url": "https://doi.org/10.1016/j.aci.2017.09.005",
+    "oa_title": "A machine learning framework for sport result prediction",
+    "oa_year": 2017,
+    "oa_doi": "https://doi.org/10.1016/j.aci.2017.09.005",
+    "openalex_match": "MISMATCH"
+  },
+  {
+    "Title": "Performance analysis in football: A critical review and implications for future research",
+    "returned_year": 2013,
+    "url": "https://doi.org/10.1080/02640414.2012.746720",
+    "oa_title": "Performance analysis in football: A critical review and implications for future research",
+    "oa_year": 2012,
+    "oa_doi": "https://doi.org/10.1080/02640414.2012.746720",
+    "openalex_match": "MISMATCH"
+  },
+  {
+    "Title": "Match analysis in football: a systematic review",
+    "returned_year": 2014,
+    "url": "https://doi.org/10.1080/02640414.2014.898852",
+    "oa_title": "Match analysis in football: a systematic review",
+    "oa_year": 2014,
+    "oa_doi": "https://doi.org/10.1080/02640414.2014.898852",
+    "openalex_match": "VERIFIED"
+  },
+  {
+    "Title": "Game-related statistics that discriminated winning, drawing and losing teams from the Spanish soccer league",
+    "returned_year": 2010,
+    "url": "https://doi.org/10.1080/0264041090358101",
+    "oa_title": "Game-Related Statistics that Discriminated Winning, Drawing and Losing Teams from the Spanish Soccer League.",
+    "oa_year": 2010,
+    "oa_doi": "",
+    "openalex_match": "MISMATCH"
+  },
+  {
+    "Title": "Big data and tactical analysis in elite soccer: future challenges and opportunities for sports science",
+    "returned_year": 2016,
+    "url": "https://doi.org/10.1186/s40064-016-3108-2",
+    "oa_title": "Big data and tactical analysis in elite soccer: future challenges and opportunities for sports science",
+    "oa_year": 2016,
+    "oa_doi": "https://doi.org/10.1186/s40064-016-3108-2",
+    "openalex_match": "VERIFIED"
+  },
+  {
+    "Title": "Data analytics in football: positional data collection, modelling and analysis",
+    "returned_year": 2017,
+    "url": "https://doi.org/10.1007/s40279-016-0664-6",
+    "oa_title": "Data Analytics in Football: Positional Data Collection, Modelling and Analysis",
+    "oa_year": 2018,
+    "oa_doi": "https://doi.org/10.4324/9781351210164",
+    "openalex_match": "MISMATCH"
+  },
+  {
+    "Title": "Spatio-temporal analysis of team sports",
+    "returned_year": 2017,
+    "url": "https://doi.org/10.1145/3054132",
+    "oa_title": "Spatio-Temporal Analysis of Team Sports",
+    "oa_year": 2017,
+    "oa_doi": "https://doi.org/10.1145/3054132",
+    "openalex_match": "VERIFIED"
+  },
+  {
+    "Title": "A public data set of spatio-temporal match events in soccer competitions",
+    "returned_year": 2019,
+    "url": "https://doi.org/10.1038/sdata.2019.236",
+    "oa_title": "A public data set of spatio-temporal match events in soccer competitions",
+    "oa_year": 2019,
+    "oa_doi": "https://doi.org/10.1038/s41597-019-0247-7",
+    "openalex_match": "MISMATCH"
+  },
+  {
+    "Title": "Actions Speak Louder Than Goals: Valuing Player Actions in Soccer",
+    "returned_year": 2019,
+    "url": "https://doi.org/10.1145/3292500.3330758",
+    "oa_title": "Actions Speak Louder than Goals: Valuing Player Actions in Soccer",
+    "oa_year": 2019,
+    "oa_doi": "https://doi.org/10.1145/3292500.3330758",
+    "openalex_match": "VERIFIED"
+  },
+  {
+    "Title": "A goal scoring probability model for shots based on players' abilities in soccer",
+    "returned_year": 2021,
+    "url": "https://doi.org/10.1371/journal.pone.0255518",
+    "oa_title": "Does market segmentation hinder interregional CO2 flow in China? — Evidence from China’s interprovincial MRIO table",
+    "oa_year": 2021,
+    "oa_doi": "https://doi.org/10.1371/journal.pone.0255518",
+    "openalex_match": "MISMATCH"
+  }
+]

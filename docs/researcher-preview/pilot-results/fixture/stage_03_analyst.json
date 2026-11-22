@@ -1,0 +1,39 @@
+{
+  "elapsed_seconds": 0.0,
+  "usage": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cost_usd": 0.0
+  },
+  "payload": {
+    "comparative_notes": "Offline fixture demonstration only; experimental benchmarks are not compared without identical conditions.",
+    "papers": [
+      {
+        "Title": "Harnessing Nonlinearity: Predicting Chaotic Systems and Saving Energy in Wireless Communication",
+        "Authors": "Herbert Jaeger; Harald Haas",
+        "Year": 2004,
+        "Publication venue": "Science",
+        "DOI or source URL": "https://doi.org/10.1126/science.1091277",
+        "Relevance rationale": "Foundational Echo State Network (classical reservoir computing) work",
+        "Seminal work candidate": "YES (classical Echo State Network baseline)",
+        "Research contribution": "Introduces Echo State Networks with fixed random recurrent reservoir and linear readout training.",
+        "Reported results": "NOT_VERIFIED (offline fixture; inspect primary paper for exact metrics)",
+        "Limitations": "Classical state-space scaling for high-dimensional quantum/nonlinear dynamics.",
+        "Evidence level": "abstract-based"
+      },
+      {
+        "Title": "Harnessing Disordered-Ensemble Quantum Dynamics for Machine Learning",
+        "Authors": "Keisuke Fujii; Kohei Nakajima",
+        "Year": 2017,
+        "Publication venue": "Physical Review Applied",
+        "DOI or source URL": "https://doi.org/10.1103/PhysRevApplied.8.024030",
+        "Relevance rationale": "Foundational Quantum Reservoir Computing architecture",
+        "Seminal work candidate": "YES (early Quantum Reservoir Computing formulation)",
+        "Research contribution": "Proposes using natural quantum ensemble dynamics as a computational reservoir.",
+        "Reported results": "NOT_VERIFIED (offline fixture; inspect primary paper for exact metrics)",
+        "Limitations": "Measurement back-action, readout overhead, and decoherence.",
+        "Evidence level": "abstract-based"
+      }
+    ]
+  }
+}
