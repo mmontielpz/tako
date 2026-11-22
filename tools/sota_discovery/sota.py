@@ -8,6 +8,7 @@ import json
 import pathlib
 import re
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -74,11 +75,37 @@ def _default_no_redirect_open(req: urllib.request.Request, timeout: float = 15.0
     return opener.open(req, timeout=timeout)
 
 
-class HttpRequestTracker:
-    """Tracks observable HTTP transport attempts, retries, failures, redirects, and cache hits."""
+DEFAULT_SAFE_MAX_HTTP_REQUESTS = 24
 
-    def __init__(self, max_http_requests: int | None = None) -> None:
+PROVIDER_MIN_INTERVAL_SECONDS: dict[str, float] = {
+    "openalex": 0.1,
+    "arxiv": 3.0,
+    "crossref": 0.35,
+    "semantic-scholar": 1.0,
+}
+
+
+class HttpRequestTracker:
+    """Tracks observable HTTP transport attempts, retries, failures, redirects, cache hits, pacing, and per-provider counts."""
+
+    def __init__(
+        self,
+        max_http_requests: int | None = None,
+        *,
+        clock: Any = None,
+        sleep_fn: Any = None,
+        provider_min_intervals: dict[str, float] | None = None,
+    ) -> None:
         self.max_http_requests = max_http_requests
+        self._clock = clock or time.monotonic
+        self._sleep = sleep_fn or time.sleep
+        self._provider_min_intervals = dict(PROVIDER_MIN_INTERVAL_SECONDS)
+        if provider_min_intervals:
+            self._provider_min_intervals.update(provider_min_intervals)
+        self._last_provider_request_ts: dict[str, float] = {}
+        self.pacing_waits = 0
+        self.total_pacing_sleep_seconds = 0.0
+        self.retry_after_waits = 0
         self.http_attempts = 0
         self.http_successes = 0
         self.http_failures = 0
@@ -88,24 +115,51 @@ class HttpRequestTracker:
         self.search_requests = 0
         self.citation_requests = 0
         self.bib_verification_requests = 0
+        self.rate_limited_responses = 0
+        self.provider_requests: dict[str, int] = {}
         self.budget_exhausted = False
         self._cache: dict[str, Any] = {}
 
-    def get_json(
+    def _pace_provider(self, provider: str) -> None:
+        min_gap = float(self._provider_min_intervals.get(provider, 0.0))
+        if min_gap <= 0.0:
+            self._last_provider_request_ts[provider] = float(self._clock())
+            return
+        now = float(self._clock())
+        prev = self._last_provider_request_ts.get(provider)
+        if prev is not None:
+            elapsed = now - prev
+            if elapsed < min_gap:
+                wait_s = round(min_gap - elapsed, 4)
+                self._sleep(wait_s)
+                self.pacing_waits += 1
+                self.total_pacing_sleep_seconds = round(self.total_pacing_sleep_seconds + wait_s, 4)
+                now = float(self._clock())
+        self._last_provider_request_ts[provider] = now
+
+    def _request_raw(
         self,
         url: str,
         *,
         timeout: float = 15.0,
         category: str = "search",
+        provider: str = "openalex",
         max_retries: int = 0,
         max_redirects: int = 3,
+        headers: dict[str, str] | None = None,
         opener: Any = None,
+        parse_json: bool = True,
     ) -> Any:
-        if url in self._cache:
+        cache_key = f"{'json' if parse_json else 'text'}:{url}"
+        if cache_key in self._cache:
             self.cached_operations += 1
-            return self._cache[url]
+            return self._cache[cache_key]
 
         open_fn = opener or _default_no_redirect_open
+        req_headers = {"User-Agent": "TAKO-SOTA-Mini-MVP/0.1 (mailto:research-local@example.org)"}
+        if headers:
+            req_headers.update(headers)
+
         last_exc: Exception | None = None
         for attempt_idx in range(max_retries + 1):
             cur_url = url
@@ -116,9 +170,11 @@ class HttpRequestTracker:
                     if self.max_http_requests is not None and self.http_attempts >= self.max_http_requests:
                         self.budget_exhausted = True
                         raise HttpBudgetExhaustedError(
-                            f"HTTP request budget exhausted ({self.http_attempts}/{self.max_http_requests}) before {category} request."
+                            f"HTTP request budget exhausted ({self.http_attempts}/{self.max_http_requests}) before {provider}:{category} request."
                         )
+                    self._pace_provider(provider)
                     self.http_attempts += 1
+                    self.provider_requests[provider] = self.provider_requests.get(provider, 0) + 1
                     if category == "search":
                         self.search_requests += 1
                     elif category == "citation":
@@ -126,10 +182,7 @@ class HttpRequestTracker:
                     elif category == "bib_verification":
                         self.bib_verification_requests += 1
 
-                    req = urllib.request.Request(
-                        cur_url,
-                        headers={"User-Agent": "TAKO-SOTA-Mini-MVP/0.1 (mailto:research-local@example.org)"},
-                    )
+                    req = urllib.request.Request(cur_url, headers=req_headers)
                     try:
                         with open_fn(req, timeout=timeout) as resp:
                             if getattr(resp, "status", 200) in (301, 302, 303, 307, 308):
@@ -138,19 +191,37 @@ class HttpRequestTracker:
                                     self.redirects_observed += 1
                                     cur_url = urllib.parse.urljoin(cur_url, loc)
                                     continue
+                            if resp.status == 429:
+                                self.rate_limited_responses += 1
+                                self.http_failures += 1
+                                ra = resp.headers.get("Retry-After") if hasattr(resp, "headers") and resp.headers else None
+                                if ra and str(ra).strip().isdigit() and attempt_idx < max_retries:
+                                    wait_ra = min(float(str(ra).strip()), 10.0)
+                                    self._sleep(wait_ra)
+                                    self.retry_after_waits += 1
+                                last_exc = RetrievalError(f"{provider} HTTP 429 rate limited for {cur_url}")
+                                break
                             if resp.status != 200:
                                 self.http_failures += 1
-                                last_exc = RetrievalError(f"OpenAlex HTTP {resp.status} for {cur_url}")
+                                last_exc = RetrievalError(f"{provider} HTTP {resp.status} for {cur_url}")
                                 break
-                            payload = json.loads(resp.read().decode("utf-8"))
+                            raw_text = resp.read().decode("utf-8")
+                            payload = json.loads(raw_text) if parse_json else raw_text
                             self.http_successes += 1
-                            self._cache[url] = payload
+                            self._cache[cache_key] = payload
                             return payload
                     except urllib.error.HTTPError as he:
                         if he.code in (301, 302, 303, 307, 308) and he.headers and he.headers.get("Location"):
                             self.redirects_observed += 1
                             cur_url = urllib.parse.urljoin(cur_url, he.headers["Location"])
                             continue
+                        if he.code == 429:
+                            self.rate_limited_responses += 1
+                            ra = he.headers.get("Retry-After") if he.headers else None
+                            if ra and str(ra).strip().isdigit() and attempt_idx < max_retries:
+                                wait_ra = min(float(str(ra).strip()), 10.0)
+                                self._sleep(wait_ra)
+                                self.retry_after_waits += 1
                         self.http_failures += 1
                         last_exc = he
                         break
@@ -159,7 +230,55 @@ class HttpRequestTracker:
             except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
                 self.http_failures += 1
                 last_exc = exc
-        raise RetrievalError(f"Live OpenAlex retrieval failed for {url!r}: {last_exc}") from last_exc
+        raise RetrievalError(f"Live {provider} retrieval failed for {url!r}: {last_exc}") from last_exc
+
+    def get_json(
+        self,
+        url: str,
+        *,
+        timeout: float = 15.0,
+        category: str = "search",
+        provider: str = "openalex",
+        max_retries: int = 0,
+        max_redirects: int = 3,
+        headers: dict[str, str] | None = None,
+        opener: Any = None,
+    ) -> Any:
+        return self._request_raw(
+            url,
+            timeout=timeout,
+            category=category,
+            provider=provider,
+            max_retries=max_retries,
+            max_redirects=max_redirects,
+            headers=headers,
+            opener=opener,
+            parse_json=True,
+        )
+
+    def get_text(
+        self,
+        url: str,
+        *,
+        timeout: float = 15.0,
+        category: str = "search",
+        provider: str = "arxiv",
+        max_retries: int = 0,
+        max_redirects: int = 3,
+        headers: dict[str, str] | None = None,
+        opener: Any = None,
+    ) -> str:
+        return self._request_raw(
+            url,
+            timeout=timeout,
+            category=category,
+            provider=provider,
+            max_retries=max_retries,
+            max_redirects=max_redirects,
+            headers=headers,
+            opener=opener,
+            parse_json=False,
+        )
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -173,6 +292,11 @@ class HttpRequestTracker:
             "search_requests": self.search_requests,
             "citation_requests": self.citation_requests,
             "bib_verification_requests": self.bib_verification_requests,
+            "rate_limited_responses": self.rate_limited_responses,
+            "pacing_waits": self.pacing_waits,
+            "total_pacing_sleep_seconds": self.total_pacing_sleep_seconds,
+            "retry_after_waits": self.retry_after_waits,
+            "provider_requests": dict(self.provider_requests),
             "budget_exhausted": self.budget_exhausted,
         }
 
@@ -518,7 +642,18 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="TAKO SOTA Discovery Mini MVP (OpenAlex stdlib CLI)")
     parser.add_argument("--topic", required=True, help="Research topic")
     parser.add_argument("--objective", required=True, help="Research objective")
-    parser.add_argument("--max-papers", type=int, default=10, help="Maximum number of papers (default: 10)")
+    parser.add_argument("--max-papers", type=int, default=10, help="Maximum accepted/exported papers (default: 10)")
+    parser.add_argument(
+        "--max-results-per-query",
+        type=int,
+        default=None,
+        help="Maximum raw results fetched per query (defaults to --max-papers)",
+    )
+    parser.add_argument(
+        "--sources",
+        default="openalex",
+        help="Comma-separated discovery sources (default: openalex; supported: openalex,arxiv,crossref,semantic-scholar)",
+    )
     parser.add_argument("--seed", action="append", default=[], help="Related topic seed (repeatable)")
     parser.add_argument("--out-dir", default="sota_output", help="Output directory")
     parser.add_argument("--fixture", type=pathlib.Path, default=None, help="Optional offline JSON fixture for testing")
@@ -529,7 +664,7 @@ def main(argv: list[str] | None = None) -> int:
         "--max-http-requests",
         type=int,
         default=None,
-        help="Maximum observable HTTP attempts across search, verification, citation expansion, retries, and redirects",
+        help=f"Maximum observable HTTP attempts across search, verification, citation expansion, retries, and redirects (default for live iterative discovery: {DEFAULT_SAFE_MAX_HTTP_REQUESTS})",
     )
     parser.add_argument("--citation-depth", type=int, default=1, help="Citation exploration depth (default: 1)")
     parser.add_argument("--no-review-first", action="store_true", help="Disable review-first discovery seed step")
@@ -538,12 +673,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.max_papers < 1 or args.max_rounds < 1 or args.max_requests < 1:
         print("ERROR: --max-papers, --max-rounds, and --max-requests must be >= 1", file=sys.stderr)
         return 2
+    if args.max_results_per_query is not None and args.max_results_per_query < 1:
+        print("ERROR: --max-results-per-query must be >= 1", file=sys.stderr)
+        return 2
     if args.max_http_requests is not None and args.max_http_requests < 1:
         print("ERROR: --max-http-requests must be >= 1", file=sys.stderr)
         return 2
 
     if args.iterative:
         from tools.sota_discovery.engine import build_research_plan, run_iterative_discovery, write_discovery_artifacts
+        from tools.sota_discovery.providers import UnsupportedProviderOperationError, get_provider, run_multi_source_search
 
         try:
             plan = build_research_plan(
@@ -551,6 +690,9 @@ def main(argv: list[str] | None = None) -> int:
                 objective=args.objective,
                 seeds=args.seed,
                 max_papers=args.max_papers,
+                max_results_per_query=args.max_results_per_query,
+                max_accepted_papers=args.max_papers,
+                max_exported_papers=args.max_papers,
                 max_rounds=args.max_rounds,
                 max_requests=args.max_requests,
                 citation_depth=args.citation_depth,
@@ -560,21 +702,46 @@ def main(argv: list[str] | None = None) -> int:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 2
 
-        if args.max_http_requests is not None:
-            plan["limits"]["max_http_requests"] = args.max_http_requests
+        effective_max_http = args.max_http_requests if args.max_http_requests is not None else (DEFAULT_SAFE_MAX_HTTP_REQUESTS if args.fixture is None else None)
+        if effective_max_http is not None:
+            plan["limits"]["max_http_requests"] = effective_max_http
+
+        sources = [s.strip().lower() for s in str(args.sources or "openalex").split(",") if s.strip()]
+        if not sources:
+            sources = ["openalex"]
+        plan["sources"] = sources
 
         search_fn = None
-        citation_fn = fetch_openalex_citations if (args.fixture is None and args.citation_depth >= 1) else None
-        tracker = HttpRequestTracker(max_http_requests=args.max_http_requests) if args.fixture is None else None
+        citation_fn = fetch_openalex_citations if (args.fixture is None and args.citation_depth >= 1 and "openalex" in sources) else None
+        tracker = HttpRequestTracker(max_http_requests=effective_max_http) if args.fixture is None else None
+        multi_errors: list[str] = []
         if args.fixture is not None:
             fx_data = json.loads(args.fixture.read_text(encoding="utf-8"))
             fx_list = list(fx_data.get("results", fx_data) if isinstance(fx_data, dict) else fx_data)
             search_fn = lambda q, n: fx_list[:n]
+        elif sources != ["openalex"]:
+            try:
+                providers = [get_provider(pid) for pid in sources]
+            except (ValueError, UnsupportedProviderOperationError) as exc:
+                print(f"ERROR: {exc}", file=sys.stderr)
+                return 2
+
+            def _multi_search(q: str, n: int) -> list[dict[str, Any]]:
+                assert tracker is not None
+                hits, errs = run_multi_source_search(q, n, providers, tracker=tracker)
+                multi_errors.extend(errs)
+                if not hits and errs:
+                    raise RetrievalError("; ".join(errs))
+                return hits
+
+            search_fn = _multi_search
 
         res = run_iterative_discovery(plan, search_fn=search_fn, citation_fn=citation_fn, tracker=tracker)
+        if multi_errors:
+            res["measurements"]["provider_failures"].extend(multi_errors)
         out_dir = pathlib.Path(args.out_dir)
         disc_outs = write_discovery_artifacts(out_dir, res)
-        accepted_recs = list(res["buckets"]["ACCEPTED_CORPUS"].values())
+        accepted_recs = list(res["buckets"]["ACCEPTED_CORPUS"].values())[: args.max_papers]
         sota_outs = write_outputs(
             out_dir=out_dir,
             topic=args.topic,

@@ -55,6 +55,37 @@ RF_ATTEMPTED = "REVIEW_FIRST_ATTEMPTED"
 RF_UNAVAILABLE = "REVIEW_FIRST_UNAVAILABLE"
 RF_NOT_APPLICABLE = "REVIEW_FIRST_NOT_APPLICABLE"
 
+OPERATIONAL_OBJECTIVE_STOPWORDS = frozenset({
+    "verify", "verification", "live", "http", "https", "accounting", "bibliographic",
+    "discovery", "benchmark", "benchmarks", "test", "testing", "workflow", "workflows",
+    "pipeline", "audit", "qualification", "experiment", "experiments", "evaluate",
+    "evaluation", "check", "checks", "report", "reporting", "matrix", "export",
+    "cli", "api", "tako", "run", "running", "operational", "telemetry",
+})
+
+GENERIC_DISCIPLINE_CONCEPTS = frozenset({
+    "computer science", "workflow", "mathematics", "physics", "chemistry",
+    "biology", "medicine", "engineering", "science", "technology",
+    "artificial intelligence", "machine learning", "data science", "research",
+    "software", "algorithm", "algorithms", "encyclopedia",
+})
+
+
+def _extract_arxiv_id(raw: Any) -> str:
+    text = str(raw or "").strip().lower()
+    if not text:
+        return ""
+    m = re.search(r"10\.48550/arxiv\.([0-9]{4}\.[0-9]{4,5}(?:v\d+)?|[a-z\-]+/[0-9]{7}(?:v\d+)?)", text)
+    if m:
+        return re.sub(r"v\d+$", "", m.group(1))
+    m2 = re.search(r"(?:arxiv\.org/(?:abs|pdf)/|arxiv:)([0-9]{4}\.[0-9]{4,5}(?:v\d+)?|[a-z\-]+/[0-9]{7}(?:v\d+)?)", text)
+    if m2:
+        return re.sub(r"v\d+$", "", m2.group(1))
+    m3 = re.fullmatch(r"([0-9]{4}\.[0-9]{4,5}(?:v\d+)?)", text)
+    if m3:
+        return re.sub(r"v\d+$", "", m3.group(1))
+    return ""
+
 
 def build_research_plan(
     *,
@@ -67,6 +98,9 @@ def build_research_plan(
     year_max: int | None = None,
     concept_groups: dict[str, list[str]] | None = None,
     max_papers: int = 10,
+    max_results_per_query: int | None = None,
+    max_accepted_papers: int | None = None,
+    max_exported_papers: int | None = None,
     max_rounds: int = 3,
     max_requests: int = 12,
     max_verification_requests: int = 20,
@@ -105,9 +139,13 @@ def build_research_plan(
                 "terms": s_terms,
                 "origin": "user_provided_seed",
             }
-        obj_terms = sorted(tokenize(clean_obj) - set(topic_terms))
+        obj_terms = sorted(tokenize(clean_obj) - set(topic_terms) - OPERATIONAL_OBJECTIVE_STOPWORDS)
         if obj_terms:
             dimensions["objective_focus"] = {"terms": obj_terms[:6], "origin": "generated_from_objective"}
+
+    eff_per_query = max_results_per_query if max_results_per_query is not None else max_papers
+    eff_accepted = max_accepted_papers if max_accepted_papers is not None else max_papers
+    eff_exported = max_exported_papers if max_exported_papers is not None else max_papers
 
     return {
         "topic": clean_topic,
@@ -119,6 +157,9 @@ def build_research_plan(
         "target_dimensions": dimensions,
         "limits": {
             "max_papers": max_papers,
+            "max_results_per_query": eff_per_query,
+            "max_accepted_papers": eff_accepted,
+            "max_exported_papers": eff_exported,
             "max_rounds": max_rounds,
             "max_search_requests": max_requests,
             "max_requests": max_requests,
@@ -131,17 +172,20 @@ def build_research_plan(
     }
 
 
-def _work_aliases(work: dict[str, Any]) -> tuple[str, list[str], str]:
-    """Return (primary_canonical_key, all_aliases, doi_key)."""
+def _work_aliases(work: dict[str, Any]) -> tuple[str, list[str], str, str]:
+    """Return (primary_canonical_key, all_aliases, doi_key, arxiv_key)."""
     doi_norm = normalize_identifier(work.get("doi") or "")
     doi_key = doi_norm["normalized"] if doi_norm["kind"] == "doi" else ""
+    arxiv_raw = work.get("arxiv_id") or work.get("doi") or work.get("id") or ""
+    arxiv_id = _extract_arxiv_id(arxiv_raw)
+    arxiv_key = f"arxiv:{arxiv_id}" if arxiv_id else ""
     oa_id = str(work.get("id") or "").strip().lower()
     title = re.sub(r"[^a-z0-9]+", " ", str(work.get("display_name") or work.get("title") or "").lower()).strip()
     year = str(work.get("publication_year") or "nd")
     ty_key = f"{title}:{year}" if title else ""
-    aliases = [a for a in (doi_key, oa_id, ty_key) if a]
-    primary = doi_key or oa_id or ty_key
-    return primary, aliases, doi_key
+    aliases = [a for a in (doi_key, arxiv_key, oa_id, ty_key) if a]
+    primary = doi_key or arxiv_key or oa_id or ty_key
+    return primary, aliases, doi_key, arxiv_key
 
 
 def _register_raw_candidate(
@@ -151,10 +195,22 @@ def _register_raw_candidate(
     plan: dict[str, Any],
     source_path: str,
 ) -> tuple[bool, str]:
-    """Register work into RAW_CANDIDATES with alias deduplication and DOI-conflict guard."""
-    primary, aliases, doi_key = _work_aliases(work)
+    """Register work into RAW_CANDIDATES with cross-source alias deduplication and conflict guards."""
+    primary, aliases, doi_key, arxiv_key = _work_aliases(work)
     if not primary:
         return False, ""
+
+    provider_name = str(work.get("_provider_source") or "openalex").strip()
+    stage = str(work.get("publication_stage") or ("preprint" if arxiv_key else "UNKNOWN")).strip()
+    obs = {
+        "provider": provider_name,
+        "id": str(work.get("id") or ""),
+        "doi": doi_key,
+        "arxiv_id": arxiv_key,
+        "year": work.get("publication_year"),
+        "venue": str(((work.get("primary_location") or {}).get("source") or {}).get("display_name") or "UNKNOWN"),
+        "publication_stage": stage,
+    }
 
     matched_cids = {alias_map[a] for a in aliases if a in alias_map}
     if len(matched_cids) == 1:
@@ -162,8 +218,17 @@ def _register_raw_candidate(
         existing_rec = buckets["RAW_CANDIDATES"][existing_cid]
         existing_doi_norm = normalize_identifier(existing_rec["_raw_work"].get("doi") or "")
         existing_doi = existing_doi_norm["normalized"] if existing_doi_norm["kind"] == "doi" else ""
-        # Conflict guard: do NOT merge if both have non-empty, different DOIs!
-        if doi_key and existing_doi and doi_key != existing_doi:
+        existing_arxiv = _extract_arxiv_id(
+            existing_rec["_raw_work"].get("arxiv_id")
+            or existing_rec["_raw_work"].get("doi")
+            or existing_rec["_raw_work"].get("id")
+            or ""
+        )
+        existing_arxiv_key = f"arxiv:{existing_arxiv}" if existing_arxiv else ""
+        # Conflict guard: do NOT merge if both have non-empty, different DOIs or different arXiv IDs!
+        doi_conflict = bool(doi_key and existing_doi and doi_key != existing_doi)
+        arxiv_conflict = bool(arxiv_key and existing_arxiv_key and arxiv_key != existing_arxiv_key)
+        if doi_conflict or arxiv_conflict:
             pass
         else:
             for a in aliases:
@@ -171,9 +236,25 @@ def _register_raw_candidate(
             if doi_key and not existing_doi:
                 existing_rec["_raw_work"]["doi"] = doi_key
                 existing_rec["DOI or source URL"] = doi_key
+            existing_rec.setdefault("_providers_observed", [])
+            if provider_name not in existing_rec["_providers_observed"]:
+                existing_rec["_providers_observed"].append(provider_name)
+            existing_rec.setdefault("_source_observations", []).append(obs)
+            existing_rec.setdefault("_publication_stages", [])
+            if stage not in existing_rec["_publication_stages"]:
+                existing_rec["_publication_stages"].append(stage)
+            conflicts = existing_rec.setdefault("_metadata_conflicts", [])
+            if obs["year"] is not None and existing_rec.get("Year") not in (None, "UNKNOWN") and str(obs["year"]) != str(existing_rec["Year"]):
+                c_tag = f"year_conflict:{existing_rec['Year']}!={obs['year']}"
+                if c_tag not in conflicts:
+                    conflicts.append(c_tag)
+            if obs["venue"] != "UNKNOWN" and existing_rec.get("Publication venue") not in (None, "UNKNOWN") and obs["venue"].lower() != str(existing_rec["Publication venue"]).lower():
+                c_tag = f"venue_conflict:{existing_rec['Publication venue']}!={obs['venue']}"
+                if c_tag not in conflicts:
+                    conflicts.append(c_tag)
             return False, existing_cid
 
-    # Ensure unique key if primary collides with a conflicting-DOI entry
+    # Ensure unique key if primary collides with a conflicting-DOI/arXiv entry
     cid = primary
     if cid in buckets["RAW_CANDIDATES"]:
         idx = 2
@@ -183,9 +264,38 @@ def _register_raw_candidate(
 
     rec = _work_to_record(work, plan, source_path)
     rec["canonical_id"] = cid
+    rec["_providers_observed"] = [provider_name]
+    rec["_source_observations"] = [obs]
+    rec["_publication_stages"] = [stage]
+    rec["_metadata_conflicts"] = []
+    rec["_related_versions"] = []
     buckets["RAW_CANDIDATES"][cid] = rec
     for a in aliases:
         alias_map.setdefault(a, cid)
+    # R05: If an explicit shared arXiv ID exists on another distinct-DOI record, link without merging
+    if arxiv_key:
+        for other_cid, other_rec in buckets["RAW_CANDIDATES"].items():
+            if other_cid == cid:
+                continue
+            other_arxiv = _extract_arxiv_id(
+                other_rec["_raw_work"].get("arxiv_id")
+                or other_rec["_raw_work"].get("doi")
+                or other_rec["_raw_work"].get("id")
+                or ""
+            )
+            if other_arxiv and f"arxiv:{other_arxiv}" == arxiv_key:
+                rec["_related_versions"].append({
+                    "relation": "shared_arxiv_version_different_doi",
+                    "canonical_id": other_cid,
+                    "arxiv_id": other_arxiv,
+                    "doi": other_rec.get("DOI or source URL", ""),
+                })
+                other_rec.setdefault("_related_versions", []).append({
+                    "relation": "shared_arxiv_version_different_doi",
+                    "canonical_id": cid,
+                    "arxiv_id": other_arxiv,
+                    "doi": rec.get("DOI or source URL", ""),
+                })
     return True, cid
 
 
@@ -274,12 +384,16 @@ def screen_candidate(rec: dict[str, Any], plan: dict[str, Any]) -> dict[str, Any
         if exc.lower() in text_blob:
             return {"outcome": SCREEN_IRRELEVANT, "reason": f"matched_exclusion:{exc}", "matched_dimensions": []}
 
-    # 2. Concept dimension matching
+    # 2. Concept dimension matching (require >= 2 distinct term hits for multi-term dimensions to prevent single-word false positives)
     matched_dims: list[str] = []
     work_tokens = tokenize(text_blob)
     for dim, spec in plan["target_dimensions"].items():
-        dim_terms = set(spec["terms"])
-        if dim_terms & work_tokens or any(t.lower() in text_blob for t in dim_terms):
+        dim_terms = {t.lower() for t in spec["terms"] if t}
+        token_hits = dim_terms & work_tokens
+        substr_hits = {t for t in dim_terms if " " in t and t in text_blob}
+        total_hits = len(token_hits | substr_hits)
+        min_required = 2 if len(dim_terms) >= 2 else 1
+        if total_hits >= min_required:
             matched_dims.append(dim)
 
     # 3. Inclusion criteria check
@@ -388,6 +502,8 @@ def run_iterative_discovery(
 
     # Review-first state
     http_budget_exhausted = False
+    skipped_generic_concepts: list[str] = []
+    topic_tokens = tokenize(plan["topic"])
     review_first_status = RF_NOT_APPLICABLE
     if plan["prefer_review_first"]:
         review_first_status = RF_ATTEMPTED
@@ -397,15 +513,22 @@ def run_iterative_discovery(
             search_requests += 1
             executed_queries.append({"round": 0, "query": rq, "origin": "review_first", "status": "ok"})
             try:
-                rev_hits = list(s_fn(rq, min(5, limits["max_papers"])) or [])
+                rev_hits = list(s_fn(rq, min(5, limits.get("max_results_per_query", limits["max_papers"]))) or [])
                 confirmed_reviews = [w for w in rev_hits if w.get("is_review") is True or str(w.get("type") or "").lower() == "review"]
                 if confirmed_reviews:
                     review_first_status = RF_APPLICABLE
                     for w in confirmed_reviews:
                         for c in (w.get("concepts") or [])[:3]:
                             cname = str(c.get("display_name") or "").strip()
-                            if cname and cname.lower() not in seen_queries:
-                                query_queue.append({"query_text": cname, "origin": "review_first_concept", "target_dimensions": []})
+                            if not cname:
+                                continue
+                            if cname.lower() in GENERIC_DISCIPLINE_CONCEPTS:
+                                if cname not in skipped_generic_concepts:
+                                    skipped_generic_concepts.append(cname)
+                                continue
+                            anchored_q = cname if (tokenize(cname) & topic_tokens) else f"{plan['topic']} {cname}"
+                            if anchored_q.lower() not in seen_queries:
+                                query_queue.append({"query_text": anchored_q, "origin": "review_first_concept", "target_dimensions": []})
                     for w in rev_hits:
                         raw_observations += 1
                         added, _ = _register_raw_candidate(buckets, alias_map, w, plan, "review_first")
@@ -453,7 +576,7 @@ def run_iterative_discovery(
             q_rec = {"round": rnd, "query": qtext, "origin": qobj["origin"], "status": "ok"}
             executed_queries.append(q_rec)
             try:
-                hits = list(s_fn(qtext, limits["max_papers"]) or [])
+                hits = list(s_fn(qtext, limits.get("max_results_per_query", limits["max_papers"])) or [])
                 for w in hits:
                     if len(buckets["RAW_CANDIDATES"]) >= limits["max_candidates"]:
                         break
@@ -591,8 +714,13 @@ def run_iterative_discovery(
                 buckets["BIBLIOGRAPHICALLY_VERIFIED"][cid] = rec
                 if scr["outcome"] == SCREEN_RELEVANT and rec["_abstract"]:
                     buckets["EVIDENCE_QUALIFIED"][cid] = rec
-                    buckets["ACCEPTED_CORPUS"][cid] = rec
-                    accepted_gain += 1
+                    max_acc = limits.get("max_accepted_papers", limits["max_papers"])
+                    if len(buckets["ACCEPTED_CORPUS"]) < max_acc:
+                        buckets["ACCEPTED_CORPUS"][cid] = rec
+                        accepted_gain += 1
+                    else:
+                        rec["Relevance rationale"] = f"{rec.get('Relevance rationale', '')}; accepted_corpus_cap_reached".strip("; ")
+                        buckets["CANDIDATES_FOR_LIMITED_USE"][cid] = rec
                 else:
                     buckets["CANDIDATES_FOR_LIMITED_USE"][cid] = rec
             else:
@@ -733,6 +861,7 @@ def run_iterative_discovery(
             "termination_reason": termination_reason,
             "wall_time_seconds": round(time.monotonic() - t0, 4),
             "provider_failures": provider_failures,
+            "skipped_generic_concepts": skipped_generic_concepts,
         },
         "termination_reason": termination_reason,
     }
