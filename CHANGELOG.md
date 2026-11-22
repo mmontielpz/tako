@@ -18,6 +18,7 @@ and this project adheres to [PEP 440](https://peps.python.org/pep-0440/) / [SemV
   - All 7 canonical M017A Tier 1 quality gates (`evaluate_tier1_quality`, `quality_report.json`): `QM-B02`, `QM-B03`, `QM-B04`, `QM-E03`, `QM-G04`, `QM-G05`, `QM-C03` with `PASS | FAIL | NOT_MEASURED | NOT_APPLICABLE | INSUFFICIENT_EVIDENCE` states.
   - Bounded remediation & downstream artifact regeneration (`run_evidence_and_comparative_pipeline`) and Minimum Viable SOTA report qualification (`EXPLORATORY_LITERATURE_MAP` vs `EVIDENCE_GROUNDED_COMPARATIVE_SOTA`, `sota_report.md`).
   - Offline scenario regression suite (`tests/sota_ai_native/test_evidence_comparative_sota.py`, `E01`–`E20`).
+  - Targeted integrity closeout (`M022-R01`–`M022-R06`): claim support completeness invariant preventing false `PASS` on `NOT_CHECKED`/`NOT_VERIFIED`/`PARTIALLY_SUPPORTED` or caller-supplied `SUPPORTED` without `assessment_evidence`; field-level extraction provenance rejecting injected absent fields; actual `char:`/`line:`/`page:`/`section:` locator verification; numerical audit records in `QM-E03` and non-penalizing `QM-C03` abstention; end-to-end `tako evidence --from-workflow-dir` interoperability from `tako sota --iterative` and `tako sota-ai`.
 
 ## [Unreleased] — `0.0.1.dev5` Candidate (Increment B: Discovery Intelligence)
 
