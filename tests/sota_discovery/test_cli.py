@@ -33,7 +33,7 @@ class TakoCliTests(unittest.TestCase):
         buf = io.StringIO()
         with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "sk-secret-do-not-leak-123456"}):
             with redirect_stdout(buf):
-                rc = main(["doctor"])
+                rc = main(["doctor", "--verbose"])
         self.assertEqual(rc, 0)
         out = buf.getvalue()
         self.assertNotIn("sk-secret-do-not-leak", out)

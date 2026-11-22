@@ -639,7 +639,17 @@ def write_outputs(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="TAKO SOTA Discovery Mini MVP (OpenAlex stdlib CLI)")
+    parser = argparse.ArgumentParser(
+        prog="tako sota",
+        description="TAKO Multi-Source SOTA Discovery (OpenAlex, arXiv, Crossref, Semantic Scholar)",
+        epilog=(
+            "Examples:\n"
+            "  tako sota --topic 'Edge AI' --objective 'Survey latency' --iterative\n"
+            "  tako sota --topic 'Edge AI' --objective 'Survey latency' --sources openalex,arxiv --max-http-requests 24\n"
+            "  tako sota --topic 'Edge AI' --objective 'Survey latency' --fixture fx.json"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("--topic", required=True, help="Research topic")
     parser.add_argument("--objective", required=True, help="Research objective")
     parser.add_argument("--max-papers", type=int, default=10, help="Maximum accepted/exported papers (default: 10)")
