@@ -176,7 +176,9 @@ def acquire_evidence(paper: dict[str, Any]) -> dict[str, Any]:
         content_hash = _sha256_text(content)
         cve = paper.get("completeness_verification_evidence")
         non_auth_origins = {"RESEARCHER_DECLARATION", "IMPORTED_THIRD_PARTY_ASSERTION", "PROVIDER_ASSERTION"}
-        cve_origin = str(cve.get("trust_origin") or "LOCALLY_EXECUTED_VERIFICATION").strip() if isinstance(cve, dict) else ""
+        raw_cve_origin = str(cve.get("trust_origin") or "LOCALLY_EXECUTED_VERIFICATION").strip() if isinstance(cve, dict) else ""
+        # Imported JSON assertions cannot self-declare a locally executed or authenticated trust origin
+        cve_origin = "IMPORTED_THIRD_PARTY_ASSERTION" if paper.get("_imported_untrusted") else raw_cve_origin
         cve_hash_ok = True
         if isinstance(cve, dict) and cve.get("source_content_hash") is not None:
             cve_hash_ok = str(cve.get("source_content_hash")) == content_hash
@@ -511,9 +513,12 @@ def _has_valid_assessment_evidence(
     *,
     expected_paper_id: str | None = None,
     expected_content_hash: str | None = None,
+    imported_untrusted: bool = False,
 ) -> bool:
     ae = raw_c.get("assessment_evidence")
     if not isinstance(ae, dict):
+        return False
+    if imported_untrusted:
         return False
     non_auth_origins = {"RESEARCHER_DECLARATION", "IMPORTED_THIRD_PARTY_ASSERTION", "PROVIDER_ASSERTION"}
     origin = str(ae.get("trust_origin") or "LOCALLY_EXECUTED_VERIFICATION").strip()
@@ -560,6 +565,7 @@ def register_claims(
                 raw_c,
                 expected_paper_id=pid,
                 expected_content_hash=target_ev.get("content_hash"),
+                imported_untrusted=bool(p.get("_imported_untrusted") or raw_c.get("_imported_untrusted")),
             )
 
             support = requested_support

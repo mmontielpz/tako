@@ -61,6 +61,16 @@ class HttpBudgetExhaustedError(RetrievalError):
     """Raised before an HTTP attempt when the observable HTTP request budget is exhausted."""
 
 
+class _NoAutoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _default_no_redirect_open(req: urllib.request.Request, timeout: float = 15.0):
+    opener = urllib.request.build_opener(_NoAutoRedirect())
+    return opener.open(req, timeout=timeout)
+
+
 class HttpRequestTracker:
     """Tracks observable HTTP transport attempts, retries, failures, redirects, and cache hits."""
 
@@ -85,46 +95,64 @@ class HttpRequestTracker:
         timeout: float = 15.0,
         category: str = "search",
         max_retries: int = 0,
+        max_redirects: int = 3,
         opener: Any = None,
     ) -> Any:
         if url in self._cache:
             self.cached_operations += 1
             return self._cache[url]
 
-        open_fn = opener or urllib.request.urlopen
+        open_fn = opener or _default_no_redirect_open
         last_exc: Exception | None = None
         for attempt_idx in range(max_retries + 1):
-            if self.max_http_requests is not None and self.http_attempts >= self.max_http_requests:
-                self.budget_exhausted = True
-                raise HttpBudgetExhaustedError(
-                    f"HTTP request budget exhausted ({self.http_attempts}/{self.max_http_requests}) before {category} request."
-                )
+            cur_url = url
             if attempt_idx > 0:
                 self.retries += 1
-            self.http_attempts += 1
-            if category == "search":
-                self.search_requests += 1
-            elif category == "citation":
-                self.citation_requests += 1
-            elif category == "bib_verification":
-                self.bib_verification_requests += 1
-
-            req = urllib.request.Request(
-                url,
-                headers={"User-Agent": "TAKO-SOTA-Mini-MVP/0.1 (mailto:research-local@example.org)"},
-            )
             try:
-                with open_fn(req, timeout=timeout) as resp:
-                    if hasattr(resp, "geturl") and resp.geturl() and resp.geturl() != url:
-                        self.redirects_observed += 1
-                    if resp.status != 200:
+                for _hop in range(max_redirects + 1):
+                    if self.max_http_requests is not None and self.http_attempts >= self.max_http_requests:
+                        self.budget_exhausted = True
+                        raise HttpBudgetExhaustedError(
+                            f"HTTP request budget exhausted ({self.http_attempts}/{self.max_http_requests}) before {category} request."
+                        )
+                    self.http_attempts += 1
+                    if category == "search":
+                        self.search_requests += 1
+                    elif category == "citation":
+                        self.citation_requests += 1
+                    elif category == "bib_verification":
+                        self.bib_verification_requests += 1
+
+                    req = urllib.request.Request(
+                        cur_url,
+                        headers={"User-Agent": "TAKO-SOTA-Mini-MVP/0.1 (mailto:research-local@example.org)"},
+                    )
+                    try:
+                        with open_fn(req, timeout=timeout) as resp:
+                            if getattr(resp, "status", 200) in (301, 302, 303, 307, 308):
+                                loc = resp.headers.get("Location") if hasattr(resp, "headers") else None
+                                if loc:
+                                    self.redirects_observed += 1
+                                    cur_url = urllib.parse.urljoin(cur_url, loc)
+                                    continue
+                            if resp.status != 200:
+                                self.http_failures += 1
+                                last_exc = RetrievalError(f"OpenAlex HTTP {resp.status} for {cur_url}")
+                                break
+                            payload = json.loads(resp.read().decode("utf-8"))
+                            self.http_successes += 1
+                            self._cache[url] = payload
+                            return payload
+                    except urllib.error.HTTPError as he:
+                        if he.code in (301, 302, 303, 307, 308) and he.headers and he.headers.get("Location"):
+                            self.redirects_observed += 1
+                            cur_url = urllib.parse.urljoin(cur_url, he.headers["Location"])
+                            continue
                         self.http_failures += 1
-                        last_exc = RetrievalError(f"OpenAlex HTTP {resp.status} for {url}")
-                        continue
-                    payload = json.loads(resp.read().decode("utf-8"))
-                    self.http_successes += 1
-                    self._cache[url] = payload
-                    return payload
+                        last_exc = he
+                        break
+            except HttpBudgetExhaustedError:
+                raise
             except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
                 self.http_failures += 1
                 last_exc = exc

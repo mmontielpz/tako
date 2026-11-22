@@ -320,8 +320,12 @@ def ingest_local_evidence(
             except json.JSONDecodeError as exc:
                 raise ValueError(f"Malformed JSON in '{raw_p}': {exc}") from exc
             if isinstance(obj, dict) and isinstance(obj.get("papers"), list):
+                for item in obj["papers"]:
+                    if isinstance(item, dict):
+                        item["_imported_untrusted"] = True
                 papers.extend(obj["papers"])
             elif isinstance(obj, dict) and ("Title" in obj or "title" in obj or "paper_id" in obj):
+                obj["_imported_untrusted"] = True
                 papers.append(obj)
             else:
                 raise ValueError(f"Unexpected JSON schema in '{raw_p}': expected object with 'papers' list or paper record.")
@@ -465,6 +469,9 @@ def cmd_evidence(argv: list[str] | None = None) -> int:
                     raise ValueError(f"WORKSPACE_CONFLICT: input topic '{in_topic}' conflicts with workspace topic '{ws_manifest['topic']}'.")
                 if in_obj and in_obj.lower() != ws_manifest["objective"].lower():
                     raise ValueError(f"WORKSPACE_CONFLICT: input objective '{in_obj}' conflicts with workspace objective '{ws_manifest['objective']}'.")
+            for item in loaded["papers"]:
+                if isinstance(item, dict):
+                    item["_imported_untrusted"] = True
             bundle = loaded
             h_key = _to_ws_rel(in_p, args.workspace) if args.workspace else str(args.input)
             input_hashes[h_key] = _sha256_file(in_p)
