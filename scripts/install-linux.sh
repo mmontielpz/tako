@@ -5,7 +5,7 @@ set -euo pipefail
 # No sudo, no pacman, no global pip, no system Python or shell profile changes.
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-WHEEL_NAME="tako_researcher_preview-0.1.0a1-py3-none-any.whl"
+WHEEL_NAME="tako_researcher_preview-0.1.0a2-py3-none-any.whl"
 WHEEL_PATH="$SCRIPT_DIR/packages/$WHEEL_NAME"
 SUMS_PATH="$SCRIPT_DIR/SHA256SUMS"
 VENV_DIR="${1:-$SCRIPT_DIR/.tako-venv}"
@@ -57,7 +57,7 @@ python3 -m venv "$VENV_DIR"
 "$VENV_DIR/bin/python" -m pip install --no-deps --no-index --quiet "$WHEEL_PATH"
 printf "installed_wheel=%s\nsha256=%s\npython=%s\n" "$WHEEL_NAME" "$ACTUAL_SUM" "$PY_VER" > "$VENV_DIR/.tako-install-manifest"
 
-echo "TAKO_INSTALL_COMPLETE venv=\"$VENV_DIR\" python=\"$PY_VER\" version=\"0.1.0a1\""
+echo "TAKO_INSTALL_COMPLETE venv=\"$VENV_DIR\" python=\"$PY_VER\" version=\"0.1.0a2\""
 echo "Next commands:"
 echo "  source \"$VENV_DIR/bin/activate\""
 echo "  tako --version"

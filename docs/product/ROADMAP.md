@@ -123,8 +123,8 @@ Supersedes conflicting pilot, platform, or release preparation notes above:
 ### Canonical Phases (`M027` Reconciled)
 
 - **`P0–P3`:** Scientific and Engineering Foundations — Completed.
-- **`P4`:** Experimental CLI Release — `v0.1.0a1` published (`M027`); `RX-001` native Linux CLI distribution (`install.sh`, `tako update`, `tako uninstall`) prepared in `M028A` for `v0.1.0a2` (`M028B`).
-- **`P5`:** JetSeg Researcher Pilot — CachyOS CLI.
+- **`P4`:** Experimental CLI Release — Closed (`v0.1.0a1` published in `M027`).
+- **`P5`:** JetSeg Researcher Pilot — CachyOS CLI (includes `RX-001` native Linux CLI distribution `v0.1.0a2` via `install.sh`, `tako update`, and `tako uninstall`).
 - **`P6`:** Researcher Experience and Optimization.
 - **`P7.0`:** Shared scientific core and Desktop architecture.
 - **`P7.1`:** Native CachyOS Desktop.

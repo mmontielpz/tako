@@ -12,7 +12,7 @@ from tools.researcher_setup import cmd_providers, cmd_setup
 from tools.sota_ai_native.workflow import main as sota_ai_main
 from tools.sota_discovery.sota import main as sota_main
 
-__version__ = "0.1.0a1"
+__version__ = "0.1.0a2"
 
 
 def main(argv: list[str] | None = None) -> int:

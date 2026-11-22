@@ -1,8 +1,8 @@
 # TAKO Native Linux Distribution (`RX-001`)
 
-> **Release Availability Notice:** The `v0.1.0a2` release and `main`-hosted `install.sh` bootstrap are prepared in `M028A` and become publicly operational only after `M028B` qualification and release publication. Until `v0.1.0a2` is published, use `--version v0.1.0a1` with a local `install.sh` checkout or the `v0.1.0a1` Researcher Starter Kit.
+> **Release:** `v0.1.0a2` (experimental alpha). For native CachyOS offline fallback, the `TAKO-Researcher-Starter-Kit-v0.1.0a2.zip` archive remains available alongside the single-command bootstrap.
 
-## 1. Installation (Target Experience for `v0.1.0a2+`)
+## 1. Installation (`v0.1.0a2+`)
 
 ### Single-Command Bootstrap
 ```bash

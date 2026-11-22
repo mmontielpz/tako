@@ -46,7 +46,7 @@ flowchart LR
 ## 05 — Current CLI and Future Desktop Boundary
 ```mermaid
 flowchart TB
-  subgraph Implemented["Implemented Today (CLI-First, 0.1.0a1)"]
+  subgraph Implemented["Implemented Today (CLI-First, 0.1.0a2)"]
     CLI["tako CLI (tools/cli.py, researcher_setup.py)"]
     Core["Shared Scientific Core (sota_discovery, sota_integrity, sota_evidence, research_workspace)"]
     CLI --> Core
