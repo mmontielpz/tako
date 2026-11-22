@@ -124,6 +124,23 @@ class SotaAiNativeTests(unittest.TestCase):
                     self.assertEqual(main(["--topic", "QRC", "--objective", "T", "--provider", "copilot-cli", "--allow-paid-api", "--out-dir", tmp]), 1)
                 with mock.patch("subprocess.run", return_value=mock.Mock(returncode=0, stdout="not json", stderr="")):
                     self.assertEqual(main(["--topic", "QRC", "--objective", "T", "--provider", "copilot-cli", "--allow-paid-api", "--out-dir", tmp]), 1)
+                with mock.patch("subprocess.run", return_value=mock.Mock(returncode=0, stdout="", stderr="no output")):
+                    self.assertEqual(main(["--topic", "QRC", "--objective", "T", "--provider", "copilot-cli", "--allow-paid-api", "--out-dir", tmp]), 1)
+
+                # F07 regression: Copilot JSONL with leading prose + fenced JSON object
+                jsonl_out = "\n".join([
+                    json.dumps({"type": "assistant.message", "data": {"content": "Here is the JSON:\n```json\n" + json.dumps(FIXTURE_PAYLOAD["researcher"]) + "\n```"}}),
+                    json.dumps({"type": "result", "usage": {"input_tokens": 120, "output_tokens": 80}}),
+                ])
+                jsonl_analyst = json.dumps({"type": "assistant.message", "data": {"content": json.dumps(FIXTURE_PAYLOAD["analyst"])}})
+                with mock.patch("subprocess.run", side_effect=[
+                    mock.Mock(returncode=0, stdout=jsonl_out, stderr=""),
+                    mock.Mock(returncode=0, stdout=jsonl_analyst, stderr=""),
+                ]):
+                    out_jsonl = pathlib.Path(tmp) / "jsonl_ok"
+                    rc_ok = main(["--topic", "QRC", "--objective", "T", "--provider", "copilot-cli", "--allow-paid-api", "--out-dir", str(out_jsonl)])
+                    self.assertEqual(rc_ok, 0)
+                    self.assertTrue((out_jsonl / "sota_report.md").is_file())
 
 
 if __name__ == "__main__":
