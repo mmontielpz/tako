@@ -10,14 +10,14 @@
 ### Windows (PowerShell)
 ```powershell
 python -m venv .tako-venv
-.\.tako-venv\Scripts\python.exe -m pip install --no-deps tako_researcher_preview-0.0.1.dev10-py3-none-any.whl
+.\.tako-venv\Scripts\python.exe -m pip install --no-deps tako_researcher_preview-0.1.0a1-py3-none-any.whl
 .\.tako-venv\Scripts\tako.exe --version
 ```
 
 ### Ubuntu / Linux
 ```bash
 python3 -m venv .tako-venv
-.tako-venv/bin/pip install --no-deps tako_researcher_preview-0.0.1.dev10-py3-none-any.whl
+.tako-venv/bin/pip install --no-deps tako_researcher_preview-0.1.0a1-py3-none-any.whl
 .tako-venv/bin/tako --version
 ```
 
