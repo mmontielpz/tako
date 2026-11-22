@@ -5,12 +5,17 @@ on:
   push:
     branches: [main, develop, experiment/researcher-preview]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - name: Repository hygiene checks
@@ -30,6 +35,7 @@ jobs:
           - python-version: "3.14"
             os: ubuntu-latest
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -93,6 +99,7 @@ jobs:
 
   python-cli-windows:
     runs-on: windows-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -133,6 +140,7 @@ jobs:
 
   engine:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Build and test engine
@@ -140,6 +148,7 @@ jobs:
 
   ui:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -154,8 +163,11 @@ jobs:
           npm run build
 
   desktop-shell:
-    # Compiled and launched locally (TAKO-004B); this job has never run on GitHub, hence continue-on-error.
+    # Explicitly isolated from CLI release qualification while DESKTOP_DEVELOPMENT=FROZEN (M025C).
+    # Re-enable in P7 with ui/dist build prerequisite before cargo check.
+    if: ${{ contains(github.event.pull_request.labels.*.name, 'desktop') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
