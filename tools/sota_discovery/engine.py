@@ -13,9 +13,11 @@ from tools.sota_discovery.sota import (
     CONTRIB_CUES,
     LIMIT_CUES,
     RESULT_CUES,
+    HttpRequestTracker,
     RetrievalError,
     extract_by_cues,
     fetch_openalex,
+    fetch_openalex_citations,
     reconstruct_abstract,
     split_sentences,
     tokenize,
@@ -340,10 +342,14 @@ def run_iterative_discovery(
     verify_doi_fn: Callable[[str], dict[str, Any] | None] | None = None,
     verify_search_fn: Callable[[str], list[dict[str, Any]]] | None = None,
     citation_fn: Callable[[dict[str, Any]], dict[str, list[dict[str, Any]]]] | None = None,
+    tracker: HttpRequestTracker | None = None,
 ) -> dict[str, Any]:
     """Execute bounded, coverage-aware iterative discovery with full state accounting."""
     t0 = time.monotonic()
-    s_fn = search_fn or _default_search_fn
+    s_fn = search_fn or (lambda q, pp: fetch_openalex(q, per_page=pp, tracker=tracker))
+    c_fn = citation_fn
+    if c_fn is fetch_openalex_citations and tracker is not None:
+        c_fn = lambda w: fetch_openalex_citations(w, tracker=tracker)
     limits = plan["limits"]
 
     buckets: dict[str, dict[str, dict[str, Any]]] = {
@@ -453,7 +459,7 @@ def run_iterative_discovery(
                 provider_failures.append(f"round_{rnd}:{qtext}:{exc}")
 
         # Bounded citation exploration on newly screened/accepted seeds
-        if citation_fn is not None and limits["citation_depth"] >= 1 and len(visited_citation_nodes) < limits["max_citation_nodes"]:
+        if c_fn is not None and limits["citation_depth"] >= 1 and len(visited_citation_nodes) < limits["max_citation_nodes"]:
             seeds_to_expand = [
                 r for cid, r in list(buckets["RAW_CANDIDATES"].items())
                 if cid not in visited_citation_nodes
@@ -468,7 +474,7 @@ def run_iterative_discovery(
                 visited_citation_nodes.add(scid)
                 citation_requests += 1
                 try:
-                    c_out = citation_fn(seed_rec["_raw_work"]) or {}
+                    c_out = c_fn(seed_rec["_raw_work"]) or {}
                     for direction in ("backward", "forward"):
                         for cw in c_out.get(direction) or []:
                             if len(buckets["RAW_CANDIDATES"]) >= limits["max_candidates"]:
@@ -669,6 +675,17 @@ def run_iterative_discovery(
             "search_requests": search_requests,
             "verification_requests": verification_requests,
             "citation_requests": citation_requests,
+            "logical_operations": {
+                "search_queries": search_requests,
+                "bibliographic_verifications": verification_requests,
+                "citation_expansions": citation_requests,
+                "total_logical_operations": search_requests + verification_requests + citation_requests,
+            },
+            "observable_http_telemetry": (
+                tracker.summary()
+                if tracker is not None
+                else {"http_attempts": "NOT_OBSERVABLE", "note": "No HttpRequestTracker attached (custom adapter or offline fixture)."}
+            ),
             "total_external_requests": search_requests + verification_requests + citation_requests,
             "unique_queries": len(executed_queries),
             "repeated_queries_prevented": repeated_queries_prevented,

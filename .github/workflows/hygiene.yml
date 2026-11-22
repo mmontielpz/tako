@@ -17,12 +17,24 @@ jobs:
         run: bash scripts/check.sh
 
   python-cli:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python-version: "3.9"
+            os: ubuntu-24.04
+          - python-version: "3.12"
+            os: ubuntu-latest
+          - python-version: "3.13"
+            os: ubuntu-latest
+          - python-version: "3.14"
+            os: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
       - name: Install optional evidence_auth test dependency
         run: python -m pip install --upgrade pip wheel cryptography
       - name: Run deterministic Python regression suites (nonzero verified, 41 tests)
@@ -78,6 +90,42 @@ jobs:
           test -f /tmp/tako-ci-fixture-out/references.bib
           test -s /tmp/tako-ci-fixture-out/references_candidates.bib
           test -s /tmp/tako-ci-fixture-out/review_report.md
+
+  python-cli-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install optional evidence_auth test dependency
+        run: python -m pip install --upgrade pip wheel cryptography
+      - name: Run deterministic Python regression suites on Windows
+        run: |
+          python -m unittest discover -s tests/sota_discovery -v
+          python -m unittest discover -s tests/sota_ai_native -v
+          python -m unittest discover -s tests/evidence_auth -v
+      - name: Build wheel and run activation-free Windows CLI offline journey (with spaces and Unicode)
+        shell: pwsh
+        run: |
+          python -m pip wheel --no-deps . -w dist
+          python -m venv .ci-win-venv
+          .\.ci-win-venv\Scripts\python.exe -m pip install --no-deps (Get-Item dist\*.whl).FullName
+          $tako = ".\.ci-win-venv\Scripts\tako.exe"
+          & $tako --version
+          & $tako doctor
+          $ws = Join-Path $env:RUNNER_TEMP "study α space"
+          $fx = Join-Path $env:RUNNER_TEMP "fx_win.json"
+          '{"results":[{"id":"https://openalex.org/W1","doi":"https://doi.org/10.1000/win.1","title":"Windows GNN Study","publication_year":2024,"primary_location":{"source":{"display_name":"NeurIPS"}},"authorships":[{"author":{"display_name":"Ada Lovelace"}}],"abstract_inverted_index":{"GNN":[0],"test.":[1]},"referenced_works":[],"cited_by_count":1}]}' | Set-Content -Encoding utf8 $fx
+          $note = Join-Path $env:RUNNER_TEMP "note_α.md"
+          "# Note`nGNN test on Windows." | Set-Content -Encoding utf8 $note
+          & $tako init --topic "GNN" --objective "Windows CLI check" --workspace $ws
+          & $tako sota --topic "GNN" --objective "Windows CLI check" --iterative --fixture $fx --out-dir (Join-Path $ws "runs\discovery")
+          & $tako sota-ai --topic "GNN" --objective "Windows CLI check" --provider fixture --out-dir (Join-Path $ws "runs\ai")
+          & $tako evidence --workspace $ws --from-workflow-dir (Join-Path $ws "runs\discovery") --source $note
+          & $tako status --workspace $ws
+          & $tako export --workspace $ws --out-dir (Join-Path $ws "exports\out") --format all
+          if (-not (Test-Path (Join-Path $ws "exports\out\sota_report.md"))) { throw "Missing exported sota_report.md" }
 
   engine:
     runs-on: ubuntu-latest

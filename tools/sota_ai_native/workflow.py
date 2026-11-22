@@ -10,6 +10,7 @@ import pathlib
 import re
 import shutil
 import subprocess
+import threading
 import sys
 import time
 import urllib.error
@@ -277,6 +278,106 @@ def extract_copilot_jsonl_response(stdout: str) -> tuple[str, dict[str, Any]]:
     return stdout, usage
 
 
+MAX_PROVIDER_OUTPUT_BYTES = 2 * 1024 * 1024
+
+
+def _sanitized_provider_env(allow_key_env: str | None = None) -> dict[str, str]:
+    """Build a minimal environment for CLI subprocesses without leaking unrelated credentials."""
+    keep = ("PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TERM", "TMPDIR", "SYSTEMROOT", "COMSPEC")
+    env = {k: os.environ[k] for k in keep if k in os.environ}
+    if allow_key_env and allow_key_env in os.environ:
+        env[allow_key_env] = os.environ[allow_key_env]
+    return env
+
+
+def _run_bounded_subprocess(
+    cmd: list[str],
+    *,
+    env: dict[str, str],
+    timeout: float,
+    max_bytes: int = MAX_PROVIDER_OUTPUT_BYTES,
+    provider_label: str = "provider CLI",
+) -> tuple[int, str, str]:
+    """Run subprocess with streaming byte-cap enforcement across stdout and stderr."""
+    # Preserve compatibility with unit tests that mock subprocess.run directly
+    if getattr(subprocess.run, "__module__", "subprocess") != "subprocess":
+        try:
+            proc = subprocess.run(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                env=env,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise ProviderBlockedError(f"{provider_label} timed out after {timeout}s.") from exc
+        if len((proc.stdout or "").encode("utf-8", errors="replace")) + len((proc.stderr or "").encode("utf-8", errors="replace")) > max_bytes:
+            raise ProviderBlockedError(f"{provider_label} output exceeded MAX_PROVIDER_OUTPUT_BYTES ({max_bytes} bytes).")
+        return proc.returncode, proc.stdout or "", proc.stderr or ""
+
+    proc = subprocess.Popen(
+        cmd,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+    )
+    out_chunks: list[bytes] = []
+    err_chunks: list[bytes] = []
+    total_bytes = 0
+    exceeded = threading.Event()
+    lock = threading.Lock()
+
+    def _drain(stream: Any, target: list[bytes]) -> None:
+        nonlocal total_bytes
+        try:
+            while True:
+                chunk = stream.read(65536)
+                if not chunk:
+                    break
+                with lock:
+                    total_bytes += len(chunk)
+                    if total_bytes > max_bytes:
+                        exceeded.set()
+                        try:
+                            proc.kill()
+                        except OSError:
+                            pass
+                        break
+                    target.append(chunk)
+        finally:
+            try:
+                stream.close()
+            except OSError:
+                pass
+
+    t_out = threading.Thread(target=_drain, args=(proc.stdout, out_chunks), daemon=True)
+    t_err = threading.Thread(target=_drain, args=(proc.stderr, err_chunks), daemon=True)
+    t_out.start()
+    t_err.start()
+    try:
+        rc = proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        try:
+            proc.kill()
+        except OSError:
+            pass
+        proc.wait()
+        t_out.join(timeout=1.0)
+        t_err.join(timeout=1.0)
+        raise ProviderBlockedError(f"{provider_label} timed out after {timeout}s.") from exc
+    t_out.join(timeout=2.0)
+    t_err.join(timeout=2.0)
+    if exceeded.is_set():
+        raise ProviderBlockedError(f"{provider_label} output exceeded MAX_PROVIDER_OUTPUT_BYTES ({max_bytes} bytes) during streaming.")
+    stdout = b"".join(out_chunks).decode("utf-8", errors="replace")
+    stderr = b"".join(err_chunks).decode("utf-8", errors="replace")
+    return rc, stdout, stderr
+
+
 def call_claude_cli(prompt: str, allow_paid_api: bool = False, timeout: float = 90.0) -> tuple[str, dict[str, Any]]:
     if not allow_paid_api:
         raise ProviderBlockedError(
@@ -285,22 +386,17 @@ def call_claude_cli(prompt: str, allow_paid_api: bool = False, timeout: float = 
     exe = shutil.which("claude")
     if not exe:
         raise ProviderBlockedError("claude CLI is not installed on PATH.")
+    rc, stdout, stderr = _run_bounded_subprocess(
+        [exe, "-p", prompt, "--output-format", "json"],
+        env=_sanitized_provider_env("ANTHROPIC_API_KEY"),
+        timeout=timeout,
+        provider_label="claude CLI",
+    )
+    if rc != 0:
+        raise ProviderBlockedError(f"claude CLI failed (exit {rc}): {stderr.strip()}")
     try:
-        proc = subprocess.run(
-            [exe, "-p", prompt, "--output-format", "json"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=timeout,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise ProviderBlockedError(f"claude CLI timed out after {timeout}s.") from exc
-    if proc.returncode != 0:
-        raise ProviderBlockedError(f"claude CLI failed (exit {proc.returncode}): {proc.stderr.strip()}")
-    try:
-        data = json.loads(proc.stdout)
-        text = data.get("result") or proc.stdout
+        data = json.loads(stdout)
+        text = data.get("result") or stdout
         u_raw = data.get("usage") or {}
         cost = data.get("total_cost_usd", "UNKNOWN")
         usage = make_usage_record(
@@ -309,12 +405,13 @@ def call_claude_cli(prompt: str, allow_paid_api: bool = False, timeout: float = 
             request_count=1,
             input_tokens=u_raw.get("input_tokens", "UNKNOWN"),
             output_tokens=u_raw.get("output_tokens", "UNKNOWN"),
+            provider_specific_usage={"http_attempts": "NOT_OBSERVABLE", "cached_tokens": u_raw.get("cache_read_input_tokens", "UNKNOWN")},
             measurement_availability="provider_reported" if (u_raw or isinstance(cost, (int, float))) else "UNKNOWN",
             provenance="claude-cli-json",
         )
     except json.JSONDecodeError:
-        text = proc.stdout
-        usage = make_usage_record(request_count=1, provenance="claude-cli-raw")
+        text = stdout
+        usage = make_usage_record(request_count=1, provider_specific_usage={"http_attempts": "NOT_OBSERVABLE"}, provenance="claude-cli-raw")
     return text, usage
 
 
@@ -326,34 +423,29 @@ def call_copilot_cli(prompt: str, allow_paid_api: bool = False, timeout: float =
     exe = shutil.which("copilot")
     if not exe:
         raise ProviderBlockedError("copilot CLI is not installed on PATH.")
-    try:
-        proc = subprocess.run(
-            [
-                exe,
-                "-p", prompt,
-                "--output-format", "json",
-                "--stream", "off",
-                "--no-ask-user",
-                "--no-custom-instructions",
-                "--disable-builtin-mcps",
-            ],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=timeout,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise ProviderBlockedError(f"copilot CLI timed out after {timeout}s.") from exc
-    if proc.returncode != 0:
-        err_preview = proc.stderr.strip()[:200] or proc.stdout.strip()[:200]
-        raise ProviderBlockedError(f"copilot CLI failed (exit {proc.returncode}): {err_preview}")
-    if not proc.stdout.strip():
-        err_preview = proc.stderr.strip()[:200]
+    rc, stdout, stderr = _run_bounded_subprocess(
+        [
+            exe,
+            "-p", prompt,
+            "--output-format", "json",
+            "--stream", "off",
+            "--no-ask-user",
+            "--no-custom-instructions",
+            "--disable-builtin-mcps",
+        ],
+        env=_sanitized_provider_env("GH_TOKEN"),
+        timeout=timeout,
+        provider_label="copilot CLI",
+    )
+    if rc != 0:
+        err_preview = stderr.strip()[:200] or stdout.strip()[:200]
+        raise ProviderBlockedError(f"copilot CLI failed (exit {rc}): {err_preview}")
+    if not stdout.strip():
+        err_preview = stderr.strip()[:200]
         raise ProviderBlockedError(
             f"copilot CLI returned empty stdout (stderr={err_preview!r})."
         )
-    return extract_copilot_jsonl_response(proc.stdout)
+    return extract_copilot_jsonl_response(stdout)
 
 
 def run_role(

@@ -10,10 +10,16 @@ from tools.research_workspace import cmd_evidence, cmd_export, cmd_init, cmd_sta
 from tools.sota_ai_native.workflow import main as sota_ai_main
 from tools.sota_discovery.sota import main as sota_main
 
-__version__ = "0.0.1.dev7"
+__version__ = "0.0.1.dev8"
 
 
 def main(argv: list[str] | None = None) -> int:
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
     argv = list(sys.argv[1:] if argv is None else argv)
     parser = argparse.ArgumentParser(
         prog="tako",

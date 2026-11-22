@@ -184,6 +184,7 @@ except auth.AuthError as e:
         with self.assertRaisesRegex(auth.AuthError,'clock_rollback'): self.fx.verify(self.fx.bundle(2),now=1499)
         self.fx.policy['keys'][0]['revoked']=True; self.fx.save_policy()
         with self.assertRaisesRegex(auth.AuthError,'without_generation'): self.fx.verify(self.fx.bundle(2))
+    @unittest.skipIf(os.name == "nt", "POSIX mode bits 0o022/0o077 not enforced on Windows NTFS")
     def test_unsafe_trust_or_private_key_files_and_reinit_fail(self):
         self.fx.policy_path.chmod(0o666)
         with self.assertRaisesRegex(auth.AuthError,'permissions'): self.fx.verify()
@@ -236,6 +237,7 @@ except auth.AuthError as e:
             with redirect_stdout(out): self.assertEqual(cli.main(args),2)
             self.assertIn('trust_or_state_inside_export',out.getvalue())
 
+    @unittest.skipIf(os.name == "nt", "POSIX mode bits 0o022/0o077 and unprivileged symlinks not enforced on Windows NTFS")
     def test_symlink_or_writable_ancestor_cannot_hide_a_trust_anchor(self):
         unsafe=self.fx.root/'unsafe'; unsafe.mkdir(mode=0o777); unsafe.chmod(0o777)
         nested=unsafe/'nested'; nested.mkdir(mode=0o700)

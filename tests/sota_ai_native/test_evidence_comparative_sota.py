@@ -563,7 +563,8 @@ class EvidenceComparativeSotaTests(unittest.TestCase):
                 rows = list(csv.DictReader(fh))
             self.assertEqual(len(rows), 2)
             q_data = json.loads((out_dir / "quality_measurements.json").read_text(encoding="utf-8"))
-            self.assertEqual(q_data["verdict"], QM_PASS)
+            # Imported JSON files via CLI cannot self-certify SUPPORTED without local execution
+            self.assertEqual(q_data["verdict"], QM_INSUFFICIENT)
 
     # --- M022A Targeted Integrity Corrections (M022-R01 .. M022-R06 + Sec 11) ---
 
