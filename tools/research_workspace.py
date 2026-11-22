@@ -438,7 +438,13 @@ def cmd_status(argv: list[str] | None = None) -> int:
     for name, st in (m.get("stages") or {}).items():
         status_val = str(st.get("status") or "NOT_STARTED")
         outs = list(st.get("outputs") or [])
-        missing = [o for o in outs if not _from_ws_rel(o, args.workspace).exists()] if outs else []
+        out_dir_rel = st.get("out_dir")
+        missing = []
+        for o in outs:
+            p_ws = _from_ws_rel(o, args.workspace)
+            p_od = (_from_ws_rel(out_dir_rel, args.workspace) / o) if out_dir_rel else None
+            if not p_ws.exists() and not (p_od is not None and p_od.exists()):
+                missing.append(o)
         if status_val == "COMPLETED" and outs and missing:
             status_val = "STALE"
         stages_view[name] = {
