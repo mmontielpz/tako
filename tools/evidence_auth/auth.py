@@ -105,19 +105,24 @@ def _parent(path):
     # Root-owned sticky directories (e.g. /tmp) protect owned child entries.
     for directory in (path.parent, *path.parent.parents):
         info = directory.lstat()
-        sticky_root = info.st_uid == 0 and bool(info.st_mode & stat.S_ISVTX)
-        require(stat.S_ISDIR(info.st_mode) and info.st_uid in {0, os.getuid()}
-                and (not info.st_mode & 0o022 or sticky_root), "unsafe_private_directory")
+        require(stat.S_ISDIR(info.st_mode) and not directory.is_symlink(), "unsafe_private_directory")
+        if hasattr(os, "getuid"):
+            sticky_root = info.st_uid == 0 and bool(info.st_mode & stat.S_ISVTX)
+            require(info.st_uid in {0, os.getuid()} and (not info.st_mode & 0o022 or sticky_root), "unsafe_private_directory")
     return path
 
 def read_local(path, private=False):
     path = _parent(path)
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        require(not path.is_symlink(), "unsafe_local_file")
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+        fd = os.open(path, flags)
         with os.fdopen(fd, "rb") as stream:
             info = os.fstat(stream.fileno())
-            require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and info.st_uid in {0, os.getuid()}, "unsafe_local_file")
-            require(not info.st_mode & (0o077 if private else 0o022), "unsafe_local_permissions")
+            require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1, "unsafe_local_file")
+            if hasattr(os, "getuid"):
+                require(info.st_uid in {0, os.getuid()}, "unsafe_local_file")
+                require(not info.st_mode & (0o077 if private else 0o022), "unsafe_local_permissions")
             blob = stream.read(LIMIT + 1)
             require(len(blob) <= LIMIT, "local_file_too_large")
             return blob
@@ -127,16 +132,19 @@ def read_local(path, private=False):
 def write_new(path, blob):
     path = _parent(path)
     try:
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        require(not path.is_symlink(), "unsafe_local_file")
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+        fd = os.open(path, flags, 0o600)
         with os.fdopen(fd, "wb") as stream:
             stream.write(blob)
             stream.flush()
             os.fsync(stream.fileno())
-        parent_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-        try:
-            os.fsync(parent_fd)
-        finally:
-            os.close(parent_fd)
+        if hasattr(os, "O_DIRECTORY"):
+            parent_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0))
+            try:
+                os.fsync(parent_fd)
+            finally:
+                os.close(parent_fd)
     except OSError as exc:
         raise AuthError("exclusive_write_failed") from exc
 
