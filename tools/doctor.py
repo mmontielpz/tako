@@ -172,7 +172,7 @@ def run_doctor(argv: list[str] | None = None) -> int:
 
     if not args.verbose:
         ai_summary = ", ".join(
-            f"{c['assistant_key']}={'READY' if (c['executable_detected'] and c['adapter_implemented']) else ('UNSUPPORTED' if not c['adapter_implemented'] else 'MISSING')}"
+            f"{c['assistant_key']}={'DETECTED(auth_unverified)' if (c['executable_detected'] and c['adapter_implemented']) else ('UNSUPPORTED' if not c['adapter_implemented'] else 'MISSING')}"
             for c in report["ai_cli_providers"]  # type: ignore[attr-defined]
         )
         cfg_state = "configured" if report["config_exists"] else "default (run `tako setup`)"
