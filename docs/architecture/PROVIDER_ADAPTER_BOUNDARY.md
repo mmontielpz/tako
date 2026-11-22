@@ -148,7 +148,7 @@ or delayed response; unknown IDs fail. Responses identify themselves as offline
 fixtures. Standard `Bridge::open` retains the real credential/adapter path even when
 the feature is compiled, and process-isolated missing-credential tests cover it.
 This build is qualification instrumentation, not live provider/account validation;
-see the [native report](../missions/TAKO-013B/REPORT.md).
+see `docs/missions/TAKO-013B/REPORT.md` (internal archive, excluded from public repo).
 
 Native WebKit qualification also found that CSP needed fixed IPC origins. The
 policy now permits `ipc://localhost` and `http://ipc.localhost` in `connect-src`

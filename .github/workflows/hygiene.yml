@@ -3,7 +3,11 @@ name: hygiene
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, develop, experiment/researcher-preview]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -11,18 +15,140 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - name: Repository hygiene checks
         run: bash scripts/check.sh
+
+  python-cli:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python-version: "3.9"
+            os: ubuntu-24.04
+          - python-version: "3.12"
+            os: ubuntu-latest
+          - python-version: "3.13"
+            os: ubuntu-latest
+          - python-version: "3.14"
+            os: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install optional evidence_auth test dependency
+        run: python -m pip install --upgrade pip wheel cryptography
+      - name: Run deterministic Python regression suites (nonzero verified, 41 tests)
+        run: |
+          python - <<'PY'
+          import re, subprocess, sys
+
+          suites = [
+              ("tests/sota_discovery", 5),
+              ("tests/sota_ai_native", 11),
+              ("tests/evidence_auth", 25),
+          ]
+          total = 0
+          for suite, min_expected in suites:
+              proc = subprocess.run(
+                  [sys.executable, "-m", "unittest", "discover", "-s", suite, "-v"],
+                  capture_output=True,
+                  text=True,
+              )
+              print(proc.stdout)
+              print(proc.stderr, file=sys.stderr)
+              if proc.returncode != 0:
+                  raise SystemExit(proc.returncode)
+              combined = proc.stdout + "\n" + proc.stderr
+              if "Ran 0 tests" in combined or "NO TESTS RAN" in combined:
+                  raise SystemExit(f"Zero tests ran for {suite}")
+              m = re.search(r"Ran (\d+) tests?", combined)
+              if not m or int(m.group(1)) < min_expected:
+                  raise SystemExit(f"Expected >= {min_expected} tests in {suite}, got: {m.group(1) if m else 'none'}")
+              total += int(m.group(1))
+          print(f"ALL_PYTHON_SUITES_PASS total={total}")
+          PY
+      - name: Build wheel and generate SHA-256 checksum
+        run: |
+          python -m pip wheel --no-deps . -w dist/
+          sha256sum dist/*.whl > dist/SHA256SUMS.txt
+          cat dist/SHA256SUMS.txt
+      - name: Install wheel in fresh isolated venv (--no-deps) and run offline CLI smoke workflow
+        run: |
+          python -m venv .ci-venv
+          .ci-venv/bin/pip install --no-deps dist/*.whl
+          .ci-venv/bin/tako --version
+          .ci-venv/bin/tako --help
+          .ci-venv/bin/tako doctor
+          .ci-venv/bin/tako sota-ai \
+            --topic "Agentic research development environments" \
+            --objective "Verify offline fixture workflow in CI" \
+            --provider fixture \
+            --with-reviewer \
+            --out-dir /tmp/tako-ci-fixture-out
+          test -s /tmp/tako-ci-fixture-out/sota_report.md
+          test -s /tmp/tako-ci-fixture-out/literature_matrix.csv
+          test -f /tmp/tako-ci-fixture-out/references.bib
+          test -s /tmp/tako-ci-fixture-out/references_candidates.bib
+          test -s /tmp/tako-ci-fixture-out/review_report.md
+
+  python-cli-windows:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install optional evidence_auth test dependency
+        run: python -m pip install --upgrade pip wheel cryptography
+      - name: Run deterministic Python regression suites on Windows
+        run: |
+          python -m unittest discover -s tests/sota_discovery -v
+          python -m unittest discover -s tests/sota_ai_native -v
+          python -m unittest discover -s tests/evidence_auth -v
+      - name: Build wheel and run activation-free Windows CLI offline journey (with spaces and Unicode)
+        shell: pwsh
+        run: |
+          python -m pip wheel --no-deps . -w dist
+          python -m venv .ci-win-venv
+          .\.ci-win-venv\Scripts\python.exe -m pip install --no-deps (Get-Item dist\*.whl).FullName
+          $tako = ".\.ci-win-venv\Scripts\tako.exe"
+          & $tako --version
+          & $tako setup --profile free --non-interactive
+          & $tako setup --show
+          & $tako providers list --json | Out-Null
+          if (-not (Test-Path (Join-Path $env:APPDATA "tako\config.json"))) { throw "Missing Windows APPDATA config.json" }
+          & $tako doctor
+          $ws = Join-Path $env:RUNNER_TEMP "study α space"
+          $fx = Join-Path $env:RUNNER_TEMP "fx_win.json"
+          '{"results":[{"id":"https://openalex.org/W1","doi":"https://doi.org/10.1000/win.1","title":"Windows GNN Study","publication_year":2024,"primary_location":{"source":{"display_name":"NeurIPS"}},"authorships":[{"author":{"display_name":"Ada Lovelace"}}],"abstract_inverted_index":{"GNN":[0],"test.":[1]},"referenced_works":[],"cited_by_count":1}]}' | Set-Content -Encoding utf8 $fx
+          $note = Join-Path $env:RUNNER_TEMP "note_α.md"
+          "# Note`nGNN test on Windows." | Set-Content -Encoding utf8 $note
+          & $tako init --topic "GNN" --objective "Windows CLI check" --workspace $ws
+          & $tako sota --topic "GNN" --objective "Windows CLI check" --iterative --fixture $fx --out-dir (Join-Path $ws "runs\discovery")
+          & $tako sota-ai --topic "GNN" --objective "Windows CLI check" --provider fixture --out-dir (Join-Path $ws "runs\ai")
+          & $tako evidence --workspace $ws --from-workflow-dir (Join-Path $ws "runs\discovery") --source $note
+          & $tako status --workspace $ws
+          & $tako export --workspace $ws --out-dir (Join-Path $ws "exports\out") --format all
+          if (-not (Test-Path (Join-Path $ws "exports\out\sota_report.md"))) { throw "Missing exported sota_report.md" }
+
   engine:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Build and test engine
         run: cargo test --workspace --locked
+
   ui:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -35,9 +161,13 @@ jobs:
           npm run typecheck
           npm test
           npm run build
+
   desktop-shell:
-    # Compiled and launched locally (TAKO-004B); this job has never run on GitHub, hence continue-on-error.
+    # Explicitly isolated from CLI release qualification while DESKTOP_DEVELOPMENT=FROZEN (M025C).
+    # Re-enable in P7 with ui/dist build prerequisite before cargo check.
+    if: ${{ contains(github.event.pull_request.labels.*.name, 'desktop') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4

@@ -1,0 +1,70 @@
+{
+  "schema_version": "tako.backend-evidence.v1",
+  "identity": {
+    "backend_id": "fixture-backend",
+    "project_id": "fixture-project",
+    "mission_id": "fixture-mission"
+  },
+  "revision": "fixture-revision-1",
+  "observed_at_ms": 1000,
+  "expires_at_ms": 2000,
+  "availability": "available",
+  "reason": null,
+  "lifecycle": "completed",
+  "execution": {
+    "execution_id": "fixture-execution-1",
+    "attempt": 1,
+    "runner_id": "fixture-runner",
+    "status": "succeeded",
+    "started_at_ms": 100,
+    "finished_at_ms": 900,
+    "exit_code": 0,
+    "subject_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "provenance_id": "fixture-run"
+  },
+  "artifacts": [
+    {
+      "artifact_id": "fixture-run",
+      "mission_id": "fixture-mission",
+      "execution_id": "fixture-execution-1",
+      "kind": "execution",
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "issuer_id": "fixture-runner"
+    },
+    {
+      "artifact_id": "fixture-checks",
+      "mission_id": "fixture-mission",
+      "execution_id": "fixture-execution-1",
+      "kind": "verification",
+      "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "issuer_id": "fixture-verifier"
+    },
+    {
+      "artifact_id": "fixture-isolation",
+      "mission_id": "fixture-mission",
+      "execution_id": "fixture-execution-1",
+      "kind": "isolation",
+      "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "issuer_id": "fixture-attestor"
+    }
+  ],
+  "verification": {
+    "status": "passed",
+    "evidence_id": "fixture-checks",
+    "expected_checks": [
+      "unit"
+    ],
+    "checks": [
+      {
+        "check_id": "unit",
+        "status": "passed"
+      }
+    ],
+    "subject_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "isolation": {
+    "claimed_level": "l1_bubblewrap",
+    "evidence_id": "fixture-isolation"
+  },
+  "acceptance": "not_supported"
+}
