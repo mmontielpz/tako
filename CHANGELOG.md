@@ -9,7 +9,8 @@ and this project adheres to [PEP 440](https://peps.python.org/pep-0440/) / [SemV
 
 ### Added
 - `CHANGELOG.md` documenting verified `v0.0.1.dev3` capabilities, limitations, and canonical `P0`–`P8` roadmap.
-- Deterministic Python CLI CI job (`python-cli`) in `.github/workflows/hygiene.yml` covering unit tests (`tests/sota_discovery`, `tests/sota_ai_native`), wheel build, SHA-256 generation, isolated wheel installation, `tako --help`, `tako doctor`, and offline fixture workflow verification.
+- Deterministic Python CI job (`python-cli`, Python `3.12`) in `.github/workflows/hygiene.yml` covering all 41 Python unit tests (`tests/sota_discovery`, `tests/sota_ai_native`, `tests/evidence_auth`), wheel build, SHA-256 generation, isolated wheel installation, `tako --help`, `tako doctor`, and offline fixture workflow verification.
+- Synthetic, public-safe `docs/contracts/backend-evidence/v1/conformance-example.json` restoring the 25 `tests/evidence_auth` conformance tests.
 
 ### Fixed
 - `scripts/check.sh`: removed assertions for private `docs/missions/*` files excluded from the sanitized public repository, and added required checks for `CHANGELOG.md`, `pyproject.toml`, and `tools/` CLI entrypoints.

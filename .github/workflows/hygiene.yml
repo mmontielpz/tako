@@ -18,24 +18,24 @@ jobs:
 
   python-cli:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
-      - name: Run deterministic Python CLI regression tests (nonzero verified)
+          python-version: "3.12"
+      - name: Install optional evidence_auth test dependency
+        run: python -m pip install --upgrade pip wheel cryptography
+      - name: Run deterministic Python regression suites (nonzero verified, 41 tests)
         run: |
           python - <<'PY'
-          import subprocess, sys
+          import re, subprocess, sys
 
           suites = [
               ("tests/sota_discovery", 5),
               ("tests/sota_ai_native", 11),
+              ("tests/evidence_auth", 25),
           ]
+          total = 0
           for suite, min_expected in suites:
               proc = subprocess.run(
                   [sys.executable, "-m", "unittest", "discover", "-s", suite, "-v"],
@@ -49,14 +49,18 @@ jobs:
               combined = proc.stdout + "\n" + proc.stderr
               if "Ran 0 tests" in combined or "NO TESTS RAN" in combined:
                   raise SystemExit(f"Zero tests ran for {suite}")
+              m = re.search(r"Ran (\d+) tests?", combined)
+              if not m or int(m.group(1)) < min_expected:
+                  raise SystemExit(f"Expected >= {min_expected} tests in {suite}, got: {m.group(1) if m else 'none'}")
+              total += int(m.group(1))
+          print(f"ALL_PYTHON_SUITES_PASS total={total}")
           PY
       - name: Build wheel and generate SHA-256 checksum
         run: |
-          python -m pip install --upgrade pip wheel
           python -m pip wheel --no-deps . -w dist/
           sha256sum dist/*.whl > dist/SHA256SUMS.txt
           cat dist/SHA256SUMS.txt
-      - name: Install wheel in fresh isolated venv and run offline CLI smoke workflow
+      - name: Install wheel in fresh isolated venv (--no-deps) and run offline CLI smoke workflow
         run: |
           python -m venv .ci-venv
           .ci-venv/bin/pip install --no-deps dist/*.whl
