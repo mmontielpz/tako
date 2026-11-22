@@ -6,12 +6,13 @@ import argparse
 import sys
 
 from tools.doctor import run_doctor
+from tools.install_lifecycle import cmd_uninstall, cmd_update
 from tools.research_workspace import cmd_evidence, cmd_export, cmd_init, cmd_status
 from tools.researcher_setup import cmd_providers, cmd_setup
 from tools.sota_ai_native.workflow import main as sota_ai_main
 from tools.sota_discovery.sota import main as sota_main
 
-__version__ = "0.1.0a1"
+__version__ = "0.1.0a2"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -41,6 +42,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("sota-ai", help="AI-native SOTA workflow (Researcher -> Analyst -> optional Reviewer)", add_help=False)
     sub.add_parser("evidence", help="Evidence ingestion, correspondence, comparative SOTA, and Tier 1 gating", add_help=False)
     sub.add_parser("export", help="Export portable scientific artifacts (Markdown, CSV, JSON, BibTeX, RIS)", add_help=False)
+    sub.add_parser("update", help="Update a TAKO-managed Linux CLI installation safely", add_help=False)
+    sub.add_parser("uninstall", help="Uninstall TAKO-managed CLI files (preserves workspaces and config)", add_help=False)
 
     ns, rest = parser.parse_known_args(argv)
     if ns.command == "doctor":
@@ -61,6 +64,10 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_evidence(rest)
     if ns.command == "export":
         return cmd_export(rest)
+    if ns.command == "update":
+        return cmd_update(rest)
+    if ns.command == "uninstall":
+        return cmd_uninstall(rest)
     return 2
 
 

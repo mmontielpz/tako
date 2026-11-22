@@ -19,7 +19,7 @@ class TakoCliTests(unittest.TestCase):
             with redirect_stdout(buf):
                 main(["--version"])
         self.assertEqual(ctx.exception.code, 0)
-        self.assertIn("0.1.0a1", buf.getvalue())
+        self.assertIn("0.1.0a2", buf.getvalue())
 
         buf2 = io.StringIO()
         with self.assertRaises(SystemExit) as ctx2:

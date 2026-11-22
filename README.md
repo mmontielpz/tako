@@ -12,7 +12,7 @@
 
 TAKO is an open-source, experimental **Agentic Research Development Environment (ARDE)** built for researchers and engineers who want bounded, traceable, evidence-grounded literature discovery and synthesis without sacrificing scientific integrity or local ownership.
 
-> **Status:** Experimental CLI (`0.1.0a1` candidate on `develop`; legacy preview `v0.0.1.dev3` published). Tested natively on **CachyOS / Ubuntu Linux** (Python `3.9, 3.12, 3.13, 3.14`) and **Windows** (Python `3.12`). Native macOS is `NOT_TESTED`. TAKO Desktop is **planned** (`P7`).
+> **Status:** Experimental CLI (`v0.1.0a2`). Qualified natively on **CachyOS Linux** (Python `3.14`); CI-tested on **Ubuntu 24.04 LTS** (Python `3.9`–`3.14`, native Ubuntu desktop `NOT_TESTED`) and **Windows** (Python `3.12`). Native macOS is `NOT_TESTED`. TAKO Desktop is **planned** (`P7.0–P7.4`).
 
 ---
 
@@ -29,19 +29,45 @@ AI-assisted literature workflows often fabricate citations, conflate model recal
 
 ## Installation
 
-Install TAKO in an isolated virtual environment (`--no-deps`, Python `>= 3.9` required; see [Researcher Quickstart](docs/RESEARCHER_QUICKSTART.md)):
+### Native Linux CLI Bootstrap (CachyOS & Ubuntu 24.04 LTS)
+
+> **Note:** See [Linux Distribution Guide](docs/LINUX_DISTRIBUTION.md) for ownership boundaries, version pinning (`--version v0.1.0a2`), security/integrity disclosures, and offline Starter Kit recovery.
+
+```bash
+# Single-command bootstrap (after v0.1.0a2 release)
+curl -fsSL https://raw.githubusercontent.com/mmontielpz/tako/main/install.sh | bash
+```
+
+Download-inspect-execute alternative:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mmontielpz/tako/main/install.sh -o install-tako.sh
+less install-tako.sh
+bash install-tako.sh
+```
+
+Update and uninstall:
+
+```bash
+tako update
+tako uninstall
+```
+
+### Offline / Manual Virtual Environment Fallback (`--no-deps`, Python `>= 3.9`)
+
+See [Researcher Quickstart](docs/RESEARCHER_QUICKSTART.md) or the `TAKO-Researcher-Starter-Kit` archive:
 
 ```powershell
 # Windows (PowerShell)
 python -m venv .tako-venv
-.\.tako-venv\Scripts\python.exe -m pip install --no-deps tako_researcher_preview-0.1.0a1-py3-none-any.whl
+.\.tako-venv\Scripts\python.exe -m pip install --no-deps tako_researcher_preview-0.1.0a2-py3-none-any.whl
 .\.tako-venv\Scripts\tako.exe --version
 ```
 
 ```bash
-# Ubuntu / Linux
+# Linux (offline wheel / Starter Kit fallback)
 python3 -m venv .tako-venv
-.tako-venv/bin/pip install --no-deps tako_researcher_preview-0.1.0a1-py3-none-any.whl
+.tako-venv/bin/pip install --no-deps tako_researcher_preview-0.1.0a2-py3-none-any.whl
 .tako-venv/bin/tako --version
 ```
 
@@ -110,7 +136,7 @@ See [Agent Starter Prompts](docs/AGENT_STARTER_PROMPTS.md) for copy-paste prompt
 ## Architecture & Roadmap
 
 - **Architecture Diagrams:** See [ARDE Architecture Diagrams](docs/architecture/ARDE_ARCHITECTURE_DIAGRAMS.md) (Workflow, Multi-Source Discovery, Evidence & Integrity, Assistant Integration, CLI/Desktop Boundary, Roadmap) and [Branding & Provenance](docs/assets/BRANDING_AND_PROVENANCE.md).
-- **Roadmap:** `P4` Experimental CLI Release (`v0.1.0a1`) → `P5` JetSeg Researcher Pilot (`CachyOS` CLI) → `P6` Researcher Experience and Optimization → `P7.0–P7.4` TAKO Desktop (`LINUX_FIRST`: CachyOS then Ubuntu 24.04 LTS) → `P8` Research Ecosystem (Deferred). See [Roadmap](docs/product/ROADMAP.md) and [Current State](CURRENT_STATE.md).
+- **Roadmap:** `P4` Closed (`v0.1.0a1`) → `P5` JetSeg Researcher Pilot (`CachyOS` CLI; `RX-001` native distribution `v0.1.0a2`) → `P6` Researcher Experience and Optimization → `P7.0–P7.4` TAKO Desktop (`LINUX_FIRST`: CachyOS then Ubuntu 24.04 LTS) → `P8` Research Ecosystem (Deferred). See [Roadmap](docs/product/ROADMAP.md) and [Current State](CURRENT_STATE.md).
 
 ---
 
