@@ -5,6 +5,18 @@ All notable changes to the public TAKO repository are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [PEP 440](https://peps.python.org/pep-0440/) / [SemVer](https://semver.org/) for releases.
 
+## [Unreleased] — `0.0.1.dev5` Candidate (Increment B: Discovery Intelligence)
+
+### Added
+- Bounded, coverage-aware iterative discovery engine (`tools/sota_discovery/engine.py`) with:
+  - Inspectable research plan (`research_plan.json`) distinguishing user-provided vs. generated concept dimensions.
+  - Review-first discovery seed step (`REVIEW_FIRST_APPLICABLE | ATTEMPTED | UNAVAILABLE | NOT_APPLICABLE`).
+  - Bounded backward/forward citation exploration with cycle prevention and visited-node tracking.
+  - Deterministic relevance screening (`RELEVANT | POTENTIALLY_RELEVANT | IRRELEVANT | INSUFFICIENT_EVIDENCE`) and 7-bucket state accounting.
+  - Accepted-only coverage tracking (`coverage_report.json`), `ARDE-ALG-01` refinement on positive gain with insufficient coverage, and explicit termination reasons (`SATURATION`, `STAGNATION`, `BUDGET_EXHAUSTED`, `MAX_ROUNDS_REACHED`, `NO_VALID_QUERIES`, `PROVIDER_FAILURE`, `INSUFFICIENT_EVIDENCE`).
+  - CLI `--iterative` mode in `tako sota` (`--max-rounds`, `--max-requests`, `--citation-depth`, `--no-review-first`) emitting `research_plan.json`, `discovery_trace.json`, `screening_decisions.csv`, and `coverage_report.json`.
+  - Offline scenario regression suite (`tests/sota_discovery/test_discovery_intelligence.py`, `D01`–`D15`).
+
 ## [Unreleased] — `0.0.1.dev4` Candidate (Increment A: Scientific Integrity)
 
 ### Added

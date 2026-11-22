@@ -73,3 +73,28 @@ Cloud/data integrations, multi-agent orchestration, team features, marketplace, 
 - `F05` — Incorrect cost and premium-request accounting.
 - `F06` — Incorrect evidence classification and traceability.
 - `F07` — Discovery relevance limitations.
+
+### Continuous Track: `OSS` — Open-Source Product Experience (Non-Blocking)
+
+- **Positioning & Tagline (Provisional):** Agentic Research Development Environment (`ARDE`) — *From research questions to reproducible scientific knowledge.*
+- **Visual Reference:** Purple octopus design reference (`BRANDING_APPROVAL=PENDING`, `DESIGN_SYSTEM_APPROVAL=PENDING`).
+- **Quality References:** AI-SDLC Lite and JACK (repository quality references, not mandatory architecture templates).
+- **Non-Blocking Policy:** `OSS` (including `M020B` as an independent workstream) is not a `P0` blocker and must not delay `P2` or `P3` scientific implementation; public-facing docs, governance, and release consistency must be resolved before the next public experimental release.
+
+| ID | Backlog Item | Alignment / Notes |
+|---|---|---|
+| `OSS-01` | README, product narrative and public documentation | Short-term reconciliation |
+| `OSS-02` | GitFlow, branch organization and repository governance | Short-term reconciliation |
+| `OSS-03` | Reconciliation of legacy T-Ship terminology and current RDLC direction | Short-term reconciliation (preserve legacy docs until dedicated mission) |
+| `OSS-04` | Professional product identity and branding | Requires dedicated owner design session |
+| `OSS-05` | Logo, mascot, companion and visual assets | Requires dedicated owner design session |
+| `OSS-06` | Researcher Experience and CLI UX | Aligns with `P4` |
+| `OSS-07` | Design system and Desktop UI/UX | Aligns with `P7` |
+| `OSS-08` | Release packaging and distribution | Aligns with `P4` |
+| `OSS-09` | Community, contribution experience and citation metadata | Continuous |
+| `OSS-10` | Future public website and interactive documentation | Deferred until justified |
+
+### Benchmark Domains (`P5`–`P6`, Deferred Until CLI Readiness)
+
+- **Internal (`INTERNAL_BENCHMARK_SEQUENCE=B02,B04,B05,B06`):** Efficient Computer Vision, Efficient AI, Edge AI, Physical AI.
+- **External (`EXTERNAL_BENCHMARK_SEQUENCE=B01,B03`):** Quantum Reservoir Computing, Soccer Analytics.

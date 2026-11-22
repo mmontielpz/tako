@@ -74,6 +74,43 @@ def fetch_openalex(query: str, per_page: int = 10, timeout: float = 15.0) -> lis
     return list(payload.get("results") or [])
 
 
+def fetch_openalex_citations(work: dict[str, Any], max_per_direction: int = 5, timeout: float = 10.0) -> dict[str, list[dict[str, Any]]]:
+    """Fetch bounded backward (referenced_works) and forward (cited_by_api_url) OpenAlex works."""
+    backward: list[dict[str, Any]] = []
+    forward: list[dict[str, Any]] = []
+
+    ref_ids = [str(r).strip() for r in (work.get("referenced_works") or []) if str(r).strip()][:max_per_direction]
+    if ref_ids:
+        short_ids = "|".join(r.rsplit("/", 1)[-1] for r in ref_ids)
+        params = urllib.parse.urlencode({"filter": f"openalex:{short_ids}", "per-page": str(max_per_direction)})
+        req = urllib.request.Request(
+            f"{OPENALEX_WORKS_URL}?{params}",
+            headers={"User-Agent": "TAKO-SOTA-Mini-MVP/0.1 (mailto:research-local@example.org)"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                if resp.status == 200:
+                    backward = list((json.loads(resp.read().decode("utf-8"))).get("results") or [])
+        except Exception:
+            pass
+
+    cited_by_url = str(work.get("cited_by_api_url") or "").strip()
+    if cited_by_url.startswith("https://api.openalex.org/"):
+        sep = "&" if "?" in cited_by_url else "?"
+        req = urllib.request.Request(
+            f"{cited_by_url}{sep}per-page={max_per_direction}",
+            headers={"User-Agent": "TAKO-SOTA-Mini-MVP/0.1 (mailto:research-local@example.org)"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                if resp.status == 200:
+                    forward = list((json.loads(resp.read().decode("utf-8"))).get("results") or [])
+        except Exception:
+            pass
+
+    return {"backward": backward, "forward": forward}
+
+
 def discover_works(
     topic: str,
     objective: str,
@@ -328,11 +365,68 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seed", action="append", default=[], help="Related topic seed (repeatable)")
     parser.add_argument("--out-dir", default="sota_output", help="Output directory")
     parser.add_argument("--fixture", type=pathlib.Path, default=None, help="Optional offline JSON fixture for testing")
+    parser.add_argument("--iterative", action="store_true", help="Run bounded coverage-aware iterative discovery (Increment B)")
+    parser.add_argument("--max-rounds", type=int, default=3, help="Maximum discovery rounds (default: 3)")
+    parser.add_argument("--max-requests", type=int, default=12, help="Maximum search requests (default: 12)")
+    parser.add_argument("--citation-depth", type=int, default=1, help="Citation exploration depth (default: 1)")
+    parser.add_argument("--no-review-first", action="store_true", help="Disable review-first discovery seed step")
     args = parser.parse_args(argv)
 
-    if args.max_papers < 1:
-        print("ERROR: --max-papers must be >= 1", file=sys.stderr)
+    if args.max_papers < 1 or args.max_rounds < 1 or args.max_requests < 1:
+        print("ERROR: --max-papers, --max-rounds, and --max-requests must be >= 1", file=sys.stderr)
         return 2
+
+    if args.iterative:
+        from tools.sota_discovery.engine import build_research_plan, run_iterative_discovery, write_discovery_artifacts
+
+        try:
+            plan = build_research_plan(
+                topic=args.topic,
+                objective=args.objective,
+                seeds=args.seed,
+                max_papers=args.max_papers,
+                max_rounds=args.max_rounds,
+                max_requests=args.max_requests,
+                citation_depth=args.citation_depth,
+                prefer_review_first=not args.no_review_first,
+            )
+        except ValueError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 2
+
+        search_fn = None
+        citation_fn = fetch_openalex_citations if (args.fixture is None and args.citation_depth >= 1) else None
+        if args.fixture is not None:
+            fx_data = json.loads(args.fixture.read_text(encoding="utf-8"))
+            fx_list = list(fx_data.get("results", fx_data) if isinstance(fx_data, dict) else fx_data)
+            search_fn = lambda q, n: fx_list[:n]
+
+        res = run_iterative_discovery(plan, search_fn=search_fn, citation_fn=citation_fn)
+        out_dir = pathlib.Path(args.out_dir)
+        disc_outs = write_discovery_artifacts(out_dir, res)
+        accepted_recs = list(res["buckets"]["ACCEPTED_CORPUS"].values())
+        sota_outs = write_outputs(
+            out_dir=out_dir,
+            topic=args.topic,
+            objective=args.objective,
+            seeds=args.seed,
+            records=accepted_recs,
+            related_topics=[],
+            is_fixture=(args.fixture is not None),
+        )
+        # Re-write discovery bib files so write_outputs does not overwrite segregated accepted/candidate split
+        disc_outs = write_discovery_artifacts(out_dir, res)
+        cov = res["coverage_report"]
+        if not cov["coverage_satisfied"]:
+            rep = out_dir / "sota_report.md"
+            rep.write_text(
+                rep.read_text(encoding="utf-8")
+                + f"\n> **Coverage Notice:** Accepted coverage is INSUFFICIENT ({cov['covered_count']}/{cov['target_count']} dimensions covered; termination={res['termination_reason']}).\n",
+                encoding="utf-8",
+            )
+        all_outs = sorted({str(p) for p in (sota_outs + disc_outs)})
+        print(f"SOTA_ITERATIVE_COMPLETE termination={res['termination_reason']} accepted={len(accepted_recs)} outputs={all_outs}")
+        return 0
 
     try:
         records, related, is_fixture = discover_works(
