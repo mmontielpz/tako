@@ -294,8 +294,9 @@ def ingest_local_evidence(
                 f"Unsupported evidence format '{ext}' for '{raw_p}'. Supported: {', '.join(sorted(SUPPORTED_LOCAL_FORMATS))}"
             )
 
-        raw_text = p.read_text(encoding="utf-8")
-        fhash = _sha256_bytes(raw_text.encode("utf-8"))
+        raw_bytes = p.read_bytes()
+        fhash = _sha256_bytes(raw_bytes)
+        raw_text = raw_bytes.decode("utf-8")
         source_records.append({"path": str(raw_p), "sha256": fhash, "format": ext})
 
         if ext in (".txt", ".md"):

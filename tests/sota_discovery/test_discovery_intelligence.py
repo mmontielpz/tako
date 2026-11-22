@@ -1,5 +1,7 @@
 """Offline regression tests for Increment B discovery intelligence (D01-D15)."""
 
+from __future__ import annotations
+
 import io
 import json
 import pathlib
