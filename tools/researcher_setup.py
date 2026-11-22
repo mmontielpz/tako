@@ -75,13 +75,23 @@ ACCESS_PROFILES: dict[str, dict[str, Any]] = {
 ASSISTANT_OPTIONS: dict[str, dict[str, str]] = {
     "agy": {
         "id": "agy",
-        "mode": "external_cli_operator",
-        "guidance": "Antigravity (AGY) operates TAKO via local CLI commands (`tako --help`, `tako init`, `tako sota`, `tako evidence`, `tako export`); AGY is not a TAKO-native synthesis provider.",
+        "mode": "cli_first_and_external_operator",
+        "guidance": "Antigravity (AGY) operates TAKO via local CLI commands or `tako sota-ai --provider agy-cli --allow-cli-session`.",
+    },
+    "codex": {
+        "id": "codex",
+        "mode": "cli_first_subscription",
+        "guidance": "OpenAI Codex CLI can be invoked via `tako sota-ai --provider codex-cli --allow-cli-session` using an authenticated `codex` session.",
+    },
+    "claude": {
+        "id": "claude",
+        "mode": "cli_first_subscription",
+        "guidance": "Claude Code CLI can be invoked via `tako sota-ai --provider claude-cli --allow-cli-session` using an authenticated `claude` session.",
     },
     "copilot": {
         "id": "copilot",
-        "mode": "external_and_optional_native_cli",
-        "guidance": "GitHub Copilot can operate TAKO via terminal commands, or be invoked via `tako sota-ai --provider copilot-cli --allow-paid-api` when authenticated.",
+        "mode": "cli_first_subscription",
+        "guidance": "GitHub Copilot CLI can operate TAKO or be invoked via `tako sota-ai --provider copilot-cli --allow-cli-session` (run `copilot login` first).",
     },
     "other": {
         "id": "other",
@@ -299,7 +309,7 @@ def cmd_setup(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="tako setup", description="Configure TAKO research access profile and non-secret preferences")
     parser.add_argument("--profile", choices=list(ACCESS_PROFILES.keys()), default=None, help="Research access profile (recommended: free)")
     parser.add_argument("--sources", default=None, help="Comma-separated implemented discovery sources")
-    parser.add_argument("--assistant", choices=list(ASSISTANT_OPTIONS.keys()), default=None, help="Preferred AI assistant (agy, copilot, other, none)")
+    parser.add_argument("--assistant", choices=list(ASSISTANT_OPTIONS.keys()), default=None, help="Preferred AI CLI assistant (agy, codex, claude, copilot, other, none)")
     parser.add_argument("--max-http-requests", type=int, default=None, help="Default observable HTTP budget per live discovery run")
     parser.add_argument("--non-interactive", action="store_true", help="Apply options/defaults without interactive prompts")
     parser.add_argument("--show", action="store_true", help="Show active configuration and precedence without modifying files")
@@ -337,11 +347,15 @@ def cmd_setup(argv: list[str] | None = None) -> int:
         assistant = args.assistant or prof_spec["recommended_assistant"]
         max_http = args.max_http_requests if args.max_http_requests is not None else prof_spec["default_max_http_requests"]
     else:
-        print("TAKO Adaptive Research Setup Wizard")
-        print("Profiles: 1=free (Recommended), 2=hybrid, 3=institutional, 4=paid, 5=offline")
+        print("TAKO Research Setup")
         prof_map = {"1": "free", "2": "hybrid", "3": "institutional", "4": "paid", "5": "offline"}
-        raw_p = (args.profile or input("Select profile [free]: ").strip().lower() or "free")
-        profile = prof_map.get(raw_p, raw_p)
+        if args.profile is not None:
+            profile = args.profile
+            print(f"Profile: {profile} ({ACCESS_PROFILES[profile]['label']})")
+        else:
+            print("Profiles: 1=free (Recommended), 2=hybrid, 3=institutional, 4=paid, 5=offline")
+            raw_p = (input("Select profile [1/free]: ").strip().lower() or "free")
+            profile = prof_map.get(raw_p, raw_p)
         if profile not in ACCESS_PROFILES:
             print(f"SETUP_ERROR: Unsupported profile {profile!r}", file=sys.stderr)
             return 2
@@ -352,11 +366,24 @@ def cmd_setup(argv: list[str] | None = None) -> int:
         elif profile == "offline":
             sources = ["fixture"]
         else:
-            raw_s = input(f"Implemented sources [{default_src_str}]: ").strip() or default_src_str
+            raw_s = input(f"Scientific sources [{default_src_str}] (Enter for default): ").strip() or default_src_str
             sources = [s.strip().lower() for s in raw_s.split(",") if s.strip()]
         assistant_default = args.assistant or prof_spec["recommended_assistant"]
-        raw_a = args.assistant or (input(f"Preferred AI assistant (agy/copilot/other/none) [{assistant_default}]: ").strip().lower() or assistant_default)
-        assistant = raw_a
+        if args.assistant is not None:
+            assistant = args.assistant
+        else:
+            from tools.ai_cli_providers import detect_ai_cli_providers
+
+            detected_keys = [p["assistant_key"] for p in detect_ai_cli_providers() if p["executable_detected"] and p["adapter_implemented"]]
+            det_hint = f"detected: {','.join(detected_keys)}" if detected_keys else "none detected"
+            assist_map = {"1": "agy", "2": "codex", "3": "claude", "4": "copilot", "5": "other", "6": "none"}
+            raw_a = (
+                input(f"Preferred AI CLI (1=agy, 2=codex, 3=claude, 4=copilot, 5=other, 6=none; {det_hint}) [{assistant_default}]: ")
+                .strip()
+                .lower()
+                or assistant_default
+            )
+            assistant = assist_map.get(raw_a, raw_a)
         max_http = args.max_http_requests if args.max_http_requests is not None else prof_spec["default_max_http_requests"]
         if cfg_path.exists() and not args.force:
             ans = input(f"Config already exists at {cfg_path}. Overwrite? [y/N]: ").strip().lower()

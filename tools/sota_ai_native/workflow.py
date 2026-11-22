@@ -17,6 +17,11 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from tools.ai_cli_providers import (
+    authorize_provider_execution,
+    build_cli_invocation,
+    sanitized_cli_env,
+)
 from tools.sota_discovery.sota import HttpBudgetExhaustedError, HttpRequestTracker, fetch_openalex
 from tools.sota_integrity import (
     aggregate_usage_records,
@@ -378,22 +383,38 @@ def _run_bounded_subprocess(
     return rc, stdout, stderr
 
 
-def call_claude_cli(prompt: str, allow_paid_api: bool = False, timeout: float = 90.0) -> tuple[str, dict[str, Any]]:
-    if not allow_paid_api:
-        raise ProviderBlockedError(
-            "Claude CLI inference requires explicit --allow-paid-api authorization."
-        )
-    exe = shutil.which("claude")
+def _run_subscription_cli(
+    provider: str,
+    exe_name: str,
+    prompt: str,
+    *,
+    allow_cli_session: bool = False,
+    allow_paid_api: bool = False,
+    timeout: float = 90.0,
+    strip_var: str | None = None,
+) -> tuple[str, dict[str, Any]]:
+    ok, reason = authorize_provider_execution(
+        provider, allow_cli_session=allow_cli_session, allow_paid_api=allow_paid_api
+    )
+    if not ok:
+        raise ProviderBlockedError(reason)
+    exe = shutil.which(exe_name)
     if not exe:
-        raise ProviderBlockedError("claude CLI is not installed on PATH.")
+        raise ProviderBlockedError(f"{exe_name} CLI is not installed on PATH.")
+    cmd = build_cli_invocation(provider, exe, prompt)
     rc, stdout, stderr = _run_bounded_subprocess(
-        [exe, "-p", prompt, "--output-format", "json"],
-        env=_sanitized_provider_env("ANTHROPIC_API_KEY"),
+        cmd,
+        env=sanitized_cli_env(strip_var),
         timeout=timeout,
-        provider_label="claude CLI",
+        provider_label=f"{exe_name} CLI",
     )
     if rc != 0:
-        raise ProviderBlockedError(f"claude CLI failed (exit {rc}): {stderr.strip()}")
+        err_preview = stderr.strip()[:200] or stdout.strip()[:200]
+        raise ProviderBlockedError(f"{exe_name} CLI failed (exit {rc}): {err_preview}")
+    if provider == "copilot-cli":
+        if not stdout.strip():
+            raise ProviderBlockedError(f"copilot CLI returned empty stdout (stderr={stderr.strip()[:200]!r}).")
+        return extract_copilot_jsonl_response(stdout)
     try:
         data = json.loads(stdout)
         text = data.get("result") or stdout
@@ -405,47 +426,30 @@ def call_claude_cli(prompt: str, allow_paid_api: bool = False, timeout: float = 
             request_count=1,
             input_tokens=u_raw.get("input_tokens", "UNKNOWN"),
             output_tokens=u_raw.get("output_tokens", "UNKNOWN"),
-            provider_specific_usage={"http_attempts": "NOT_OBSERVABLE", "cached_tokens": u_raw.get("cache_read_input_tokens", "UNKNOWN")},
+            provider_specific_usage={"http_attempts": "NOT_OBSERVABLE"},
             measurement_availability="provider_reported" if (u_raw or isinstance(cost, (int, float))) else "UNKNOWN",
-            provenance="claude-cli-json",
+            provenance=f"{provider}-json",
         )
     except json.JSONDecodeError:
         text = stdout
-        usage = make_usage_record(request_count=1, provider_specific_usage={"http_attempts": "NOT_OBSERVABLE"}, provenance="claude-cli-raw")
+        usage = make_usage_record(request_count=1, provider_specific_usage={"http_attempts": "NOT_OBSERVABLE"}, provenance=f"{provider}-raw")
     return text, usage
 
 
-def call_copilot_cli(prompt: str, allow_paid_api: bool = False, timeout: float = 120.0) -> tuple[str, dict[str, Any]]:
-    if not allow_paid_api:
-        raise ProviderBlockedError(
-            "Copilot CLI inference requires explicit --allow-paid-api authorization."
-        )
-    exe = shutil.which("copilot")
-    if not exe:
-        raise ProviderBlockedError("copilot CLI is not installed on PATH.")
-    rc, stdout, stderr = _run_bounded_subprocess(
-        [
-            exe,
-            "-p", prompt,
-            "--output-format", "json",
-            "--stream", "off",
-            "--no-ask-user",
-            "--no-custom-instructions",
-            "--disable-builtin-mcps",
-        ],
-        env=_sanitized_provider_env("GH_TOKEN"),
-        timeout=timeout,
-        provider_label="copilot CLI",
-    )
-    if rc != 0:
-        err_preview = stderr.strip()[:200] or stdout.strip()[:200]
-        raise ProviderBlockedError(f"copilot CLI failed (exit {rc}): {err_preview}")
-    if not stdout.strip():
-        err_preview = stderr.strip()[:200]
-        raise ProviderBlockedError(
-            f"copilot CLI returned empty stdout (stderr={err_preview!r})."
-        )
-    return extract_copilot_jsonl_response(stdout)
+def call_agy_cli(prompt: str, allow_cli_session: bool = False, allow_paid_api: bool = False, timeout: float = 90.0) -> tuple[str, dict[str, Any]]:
+    return _run_subscription_cli("agy-cli", "agy", prompt, allow_cli_session=allow_cli_session, allow_paid_api=allow_paid_api, timeout=timeout)
+
+
+def call_codex_cli(prompt: str, allow_cli_session: bool = False, allow_paid_api: bool = False, timeout: float = 90.0) -> tuple[str, dict[str, Any]]:
+    return _run_subscription_cli("codex-cli", "codex", prompt, allow_cli_session=allow_cli_session, allow_paid_api=allow_paid_api, timeout=timeout, strip_var="OPENAI_API_KEY")
+
+
+def call_claude_cli(prompt: str, allow_paid_api: bool = False, timeout: float = 90.0, allow_cli_session: bool = False) -> tuple[str, dict[str, Any]]:
+    return _run_subscription_cli("claude-cli", "claude", prompt, allow_cli_session=allow_cli_session, allow_paid_api=allow_paid_api, timeout=timeout, strip_var="ANTHROPIC_API_KEY")
+
+
+def call_copilot_cli(prompt: str, allow_paid_api: bool = False, timeout: float = 120.0, allow_cli_session: bool = False) -> tuple[str, dict[str, Any]]:
+    return _run_subscription_cli("copilot-cli", "copilot", prompt, allow_cli_session=allow_cli_session, allow_paid_api=allow_paid_api, timeout=timeout, strip_var="GH_TOKEN")
 
 
 def run_role(
@@ -455,6 +459,7 @@ def run_role(
     model: str,
     allow_paid_api: bool,
     fixture_data: dict[str, Any] | None,
+    allow_cli_session: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     if provider == "fixture":
         assert fixture_data is not None
@@ -471,11 +476,17 @@ def run_role(
     if provider == "openai-responses":
         raw, usage = call_openai_responses_web_search(prompt, model=model, allow_paid_api=allow_paid_api)
         return validate_role_payload(role_name, parse_provider_json(raw, provider), provider), usage
+    if provider == "agy-cli":
+        raw, usage = call_agy_cli(prompt, allow_cli_session=allow_cli_session, allow_paid_api=allow_paid_api)
+        return validate_role_payload(role_name, parse_provider_json(raw, provider), provider), usage
+    if provider == "codex-cli":
+        raw, usage = call_codex_cli(prompt, allow_cli_session=allow_cli_session, allow_paid_api=allow_paid_api)
+        return validate_role_payload(role_name, parse_provider_json(raw, provider), provider), usage
     if provider == "claude-cli":
-        raw, usage = call_claude_cli(prompt, allow_paid_api=allow_paid_api)
+        raw, usage = call_claude_cli(prompt, allow_paid_api=allow_paid_api, allow_cli_session=allow_cli_session)
         return validate_role_payload(role_name, parse_provider_json(raw, provider), provider), usage
     if provider == "copilot-cli":
-        raw, usage = call_copilot_cli(prompt, allow_paid_api=allow_paid_api)
+        raw, usage = call_copilot_cli(prompt, allow_paid_api=allow_paid_api, allow_cli_session=allow_cli_session)
         return validate_role_payload(role_name, parse_provider_json(raw, provider), provider), usage
     raise ProviderBlockedError(f"Unsupported provider: {provider}")
 
@@ -697,11 +708,26 @@ def write_ai_native_outputs(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="TAKO AI-Native SOTA Discovery Workflow")
+    parser = argparse.ArgumentParser(
+        prog="tako sota-ai",
+        description="TAKO Research Mate / AI-Native SOTA Workflow (Researcher -> Analyst -> optional Reviewer)",
+        epilog=(
+            "Examples:\n"
+            "  tako sota-ai --topic 'Edge AI' --objective 'Survey latency' --provider fixture\n"
+            "  tako sota-ai --topic 'Edge AI' --objective 'Survey latency' --provider claude-cli --allow-cli-session\n"
+            "  tako sota-ai --topic 'Edge AI' --objective 'Survey latency' --provider openai-responses --allow-paid-api"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("--topic", required=True)
     parser.add_argument("--objective", required=True)
     parser.add_argument("--max-papers", type=int, default=10)
-    parser.add_argument("--provider", choices=["openai-responses", "claude-cli", "copilot-cli", "fixture"], default="openai-responses")
+    parser.add_argument(
+        "--provider",
+        choices=["agy-cli", "codex-cli", "claude-cli", "copilot-cli", "openai-responses", "fixture"],
+        default="fixture",
+        help="AI provider (default: fixture; use --allow-cli-session for local AI CLIs or --allow-paid-api for direct API)",
+    )
     parser.add_argument("--model", default="gpt-4.1-mini")
     parser.add_argument("--with-reviewer", action="store_true", help="Run optional Reviewer role")
     parser.add_argument("--verify-bib", action="store_true", help="Optionally verify citations via OpenAlex")
@@ -711,7 +737,12 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Maximum observable HTTP attempts for --verify-bib (OpenAlex); does not bound black-box provider CLI network activity",
     )
-    parser.add_argument("--allow-paid-api", action="store_true", help="Explicitly authorize paid provider API/CLI calls")
+    parser.add_argument(
+        "--allow-cli-session",
+        action="store_true",
+        help="Authorize local authenticated AI CLI execution (may consume subscription quotas, credits, or premium requests)",
+    )
+    parser.add_argument("--allow-paid-api", action="store_true", help="Explicitly authorize direct metered API calls (e.g. openai-responses)")
     parser.add_argument("--fixture", type=pathlib.Path, default=None, help="Offline JSON fixture for --provider fixture (defaults to bundled example_fixture.json)")
     parser.add_argument("--out-dir", default="sota_ai_native_output")
     args = parser.parse_args(argv)
@@ -753,7 +784,7 @@ def main(argv: list[str] | None = None) -> int:
             f"'Title', 'Authors' (semicolon-separated string), 'Year', 'Publication venue', 'DOI or source URL', "
             f"'Relevance rationale', 'Seminal work candidate', 'Evidence level' [one of: metadata-only, abstract-based, model-recall, NOT_VERIFIED])."
         )
-        researcher_out, u1 = run_role("researcher", researcher_prompt, args.provider, args.model, args.allow_paid_api, fixture_data)
+        researcher_out, u1 = run_role("researcher", researcher_prompt, args.provider, args.model, args.allow_paid_api, fixture_data, allow_cli_session=args.allow_cli_session)
         _save_stage_json(out_dir, "stage_01_researcher.json", {"elapsed_seconds": round(time.monotonic() - ts_r0, 3), "usage": u1, "payload": researcher_out})
 
         bib_tracker = HttpRequestTracker(max_http_requests=args.max_http_requests) if args.verify_bib else None
@@ -772,7 +803,7 @@ def main(argv: list[str] | None = None) -> int:
             f"'Seminal work candidate', 'Research contribution', 'Reported results', 'Limitations', 'Evidence level'). "
             f"Papers: {json.dumps(researcher_out)}. Bibliographic verification: {json.dumps(bib_checks)}."
         )
-        analyst_out, u2 = run_role("analyst", analyst_prompt, args.provider, args.model, args.allow_paid_api, fixture_data)
+        analyst_out, u2 = run_role("analyst", analyst_prompt, args.provider, args.model, args.allow_paid_api, fixture_data, allow_cli_session=args.allow_cli_session)
         _save_stage_json(out_dir, "stage_03_analyst.json", {"elapsed_seconds": round(time.monotonic() - ts_a0, 3), "usage": u2, "payload": analyst_out})
 
         reviewer_out = None
@@ -784,7 +815,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"{json.dumps(analyst_out)} (bib_checks={json.dumps(bib_checks)}). "
                 f"Return ONLY a single valid JSON object (no markdown, no prose) with keys 'challenged_claims', 'missing_foundational', 'corrections' (all lists of strings)."
             )
-            reviewer_out, u3 = run_role("reviewer", reviewer_prompt, args.provider, args.model, args.allow_paid_api, fixture_data)
+            reviewer_out, u3 = run_role("reviewer", reviewer_prompt, args.provider, args.model, args.allow_paid_api, fixture_data, allow_cli_session=args.allow_cli_session)
             _save_stage_json(out_dir, "stage_04_reviewer.json", {"elapsed_seconds": round(time.monotonic() - ts_v0, 3), "usage": u3, "payload": reviewer_out})
     except ProviderBlockedError as exc:
         print(f"PROVIDER_BLOCKED: {exc}", file=sys.stderr)
