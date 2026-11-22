@@ -17,7 +17,7 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from tools.sota_discovery.sota import fetch_openalex
+from tools.sota_discovery.sota import HttpBudgetExhaustedError, HttpRequestTracker, fetch_openalex
 from tools.sota_integrity import (
     aggregate_usage_records,
     classify_evidence_provenance,
@@ -480,8 +480,20 @@ def run_role(
     raise ProviderBlockedError(f"Unsupported provider: {provider}")
 
 
-def _fetch_openalex_by_doi(normalized_doi: str) -> dict[str, Any] | None:
+def _fetch_openalex_by_doi(
+    normalized_doi: str,
+    *,
+    tracker: HttpRequestTracker | None = None,
+) -> dict[str, Any] | None:
     doi_url = "https://api.openalex.org/works/" + normalized_doi.strip()
+    if tracker is not None:
+        try:
+            payload = tracker.get_json(doi_url, timeout=10.0, category="bib_verification")
+            return payload if isinstance(payload, dict) else None
+        except HttpBudgetExhaustedError:
+            raise
+        except Exception:
+            return None
     req = urllib.request.Request(doi_url, headers={"User-Agent": "TAKO-SOTA-Mini-MVP/0.1"})
     try:
         with urllib.request.urlopen(req, timeout=10.0) as resp:
@@ -492,19 +504,45 @@ def _fetch_openalex_by_doi(normalized_doi: str) -> dict[str, Any] | None:
     return None
 
 
-def verify_bibliographic_records(papers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def verify_bibliographic_records(
+    papers: list[dict[str, Any]],
+    *,
+    tracker: HttpRequestTracker | None = None,
+) -> list[dict[str, Any]]:
     """Optional deterministic OpenAlex verification preserving original returned metadata."""
     seen_identities: set[str] = set()
     checks: list[dict[str, Any]] = []
+    budget_exhausted = False
     for p in papers:
-        checks.append(
-            verify_paper_identity(
-                p,
-                fetch_by_doi_fn=_fetch_openalex_by_doi,
-                search_fn=lambda q: fetch_openalex(q, per_page=3, timeout=10.0),
-                seen_identities=seen_identities,
+        if budget_exhausted or (tracker is not None and tracker.budget_exhausted):
+            checks.append({
+                "Title": str(p.get("Title") or "").strip(),
+                "url": str(p.get("DOI or source URL") or "").strip(),
+                "openalex_match": "UNVERIFIABLE",
+                "identity_verification_outcome": "UNVERIFIABLE",
+                "discrepancy_evidence": ["http_budget_exhausted"],
+                "corrected_identity": None,
+            })
+            continue
+        try:
+            checks.append(
+                verify_paper_identity(
+                    p,
+                    fetch_by_doi_fn=lambda d: _fetch_openalex_by_doi(d, tracker=tracker),
+                    search_fn=lambda q: fetch_openalex(q, per_page=3, timeout=10.0, tracker=tracker, category="bib_verification"),
+                    seen_identities=seen_identities,
+                )
             )
-        )
+        except HttpBudgetExhaustedError:
+            budget_exhausted = True
+            checks.append({
+                "Title": str(p.get("Title") or "").strip(),
+                "url": str(p.get("DOI or source URL") or "").strip(),
+                "openalex_match": "UNVERIFIABLE",
+                "identity_verification_outcome": "UNVERIFIABLE",
+                "discrepancy_evidence": ["http_budget_exhausted"],
+                "corrected_identity": None,
+            })
     return checks
 
 
@@ -667,10 +705,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", default="gpt-4.1-mini")
     parser.add_argument("--with-reviewer", action="store_true", help="Run optional Reviewer role")
     parser.add_argument("--verify-bib", action="store_true", help="Optionally verify citations via OpenAlex")
+    parser.add_argument(
+        "--max-http-requests",
+        type=int,
+        default=None,
+        help="Maximum observable HTTP attempts for --verify-bib (OpenAlex); does not bound black-box provider CLI network activity",
+    )
     parser.add_argument("--allow-paid-api", action="store_true", help="Explicitly authorize paid provider API/CLI calls")
     parser.add_argument("--fixture", type=pathlib.Path, default=None, help="Offline JSON fixture for --provider fixture (defaults to bundled example_fixture.json)")
     parser.add_argument("--out-dir", default="sota_ai_native_output")
     args = parser.parse_args(argv)
+
+    if args.max_http_requests is not None and args.max_http_requests < 1:
+        print("ERROR: --max-http-requests must be >= 1", file=sys.stderr)
+        return 2
 
     t0 = time.monotonic()
     fixture_data = None
@@ -694,9 +742,12 @@ def main(argv: list[str] | None = None) -> int:
         researcher_out, u1 = run_role("researcher", researcher_prompt, args.provider, args.model, args.allow_paid_api, fixture_data)
         _save_stage_json(out_dir, "stage_01_researcher.json", {"elapsed_seconds": round(time.monotonic() - ts_r0, 3), "usage": u1, "payload": researcher_out})
 
-        bib_checks = verify_bibliographic_records(researcher_out.get("papers") or []) if args.verify_bib else None
+        bib_tracker = HttpRequestTracker(max_http_requests=args.max_http_requests) if args.verify_bib else None
+        bib_checks = verify_bibliographic_records(researcher_out.get("papers") or [], tracker=bib_tracker) if args.verify_bib else None
         if bib_checks is not None:
             _save_stage_json(out_dir, "stage_02_bib_verification.json", bib_checks)
+            if bib_tracker is not None:
+                _save_stage_json(out_dir, "stage_02_bib_verification_telemetry.json", bib_tracker.summary())
 
         ts_a0 = time.monotonic()
         analyst_prompt = (

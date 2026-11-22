@@ -13,6 +13,7 @@ from tools.sota_discovery.sota import (
     CONTRIB_CUES,
     LIMIT_CUES,
     RESULT_CUES,
+    HttpBudgetExhaustedError,
     HttpRequestTracker,
     RetrievalError,
     extract_by_cues,
@@ -386,6 +387,7 @@ def run_iterative_discovery(
         query_queue.append({"query_text": s, "origin": "user_seed", "target_dimensions": []})
 
     # Review-first state
+    http_budget_exhausted = False
     review_first_status = RF_NOT_APPLICABLE
     if plan["prefer_review_first"]:
         review_first_status = RF_ATTEMPTED
@@ -411,6 +413,11 @@ def run_iterative_discovery(
                             duplicate_observations += 1
                 else:
                     review_first_status = RF_UNAVAILABLE
+            except HttpBudgetExhaustedError as exc:
+                review_first_status = RF_UNAVAILABLE
+                http_budget_exhausted = True
+                provider_failures.append(f"review_first:{exc}")
+                executed_queries[-1]["status"] = f"budget_exhausted:{exc}"
             except Exception as exc:
                 review_first_status = RF_UNAVAILABLE
                 provider_failures.append(f"review_first:{exc}")
@@ -419,10 +426,13 @@ def run_iterative_discovery(
     rounds_trace: list[dict[str, Any]] = []
     screening_rows: list[dict[str, Any]] = []
     seen_bib_identities: set[str] = set()
-    termination_reason = TERM_MAX_ROUNDS_REACHED
+    termination_reason = TERM_BUDGET_EXHAUSTED if http_budget_exhausted else TERM_MAX_ROUNDS_REACHED
     consecutive_stagnant_rounds = 0
 
     for rnd in range(1, limits["max_rounds"] + 1):
+        if http_budget_exhausted:
+            termination_reason = TERM_BUDGET_EXHAUSTED
+            break
         round_queries_run = 0
         new_raw_this_round = 0
         round_errors = 0
@@ -453,13 +463,19 @@ def run_iterative_discovery(
                         new_raw_this_round += 1
                     else:
                         duplicate_observations += 1
+            except HttpBudgetExhaustedError as exc:
+                round_errors += 1
+                http_budget_exhausted = True
+                q_rec["status"] = f"budget_exhausted:{exc}"
+                provider_failures.append(f"round_{rnd}:{qtext}:{exc}")
+                break
             except Exception as exc:
                 round_errors += 1
                 q_rec["status"] = f"error:{exc}"
                 provider_failures.append(f"round_{rnd}:{qtext}:{exc}")
 
         # Bounded citation exploration on newly screened/accepted seeds
-        if c_fn is not None and limits["citation_depth"] >= 1 and len(visited_citation_nodes) < limits["max_citation_nodes"]:
+        if not http_budget_exhausted and c_fn is not None and limits["citation_depth"] >= 1 and len(visited_citation_nodes) < limits["max_citation_nodes"]:
             seeds_to_expand = [
                 r for cid, r in list(buckets["RAW_CANDIDATES"].items())
                 if cid not in visited_citation_nodes
@@ -488,6 +504,10 @@ def run_iterative_discovery(
                                 new_raw_this_round += 1
                             else:
                                 duplicate_observations += 1
+                except HttpBudgetExhaustedError as exc:
+                    http_budget_exhausted = True
+                    provider_failures.append(f"citation:{scid}:{exc}")
+                    break
                 except Exception as exc:
                     provider_failures.append(f"citation:{scid}:{exc}")
 
@@ -515,16 +535,31 @@ def run_iterative_discovery(
 
             buckets["SCREENED_CANDIDATES"][cid] = rec
 
-            # Bibliographic identity verification (bounded by max_verification_requests)
+            # Bibliographic identity verification (bounded by max_verification_requests and http budget)
             if verify_doi_fn is not None or verify_search_fn is not None:
-                if verification_requests < limits["max_verification_requests"]:
+                if http_budget_exhausted:
+                    bib_chk = {
+                        "identity_verification_outcome": "UNVERIFIABLE",
+                        "discrepancy_evidence": ["http_budget_exhausted"],
+                        "corrected_identity": None,
+                    }
+                elif verification_requests < limits["max_verification_requests"]:
                     verification_requests += 1
-                    bib_chk = verify_paper_identity(
-                        rec,
-                        fetch_by_doi_fn=verify_doi_fn or (lambda d: None),
-                        search_fn=verify_search_fn or (lambda q: []),
-                        seen_identities=seen_bib_identities,
-                    )
+                    try:
+                        bib_chk = verify_paper_identity(
+                            rec,
+                            fetch_by_doi_fn=verify_doi_fn or (lambda d: None),
+                            search_fn=verify_search_fn or (lambda q: []),
+                            seen_identities=seen_bib_identities,
+                        )
+                    except HttpBudgetExhaustedError as exc:
+                        http_budget_exhausted = True
+                        provider_failures.append(f"verify:{cid}:{exc}")
+                        bib_chk = {
+                            "identity_verification_outcome": "UNVERIFIABLE",
+                            "discrepancy_evidence": ["http_budget_exhausted"],
+                            "corrected_identity": None,
+                        }
                 else:
                     bib_chk = {
                         "identity_verification_outcome": "UNVERIFIABLE",
@@ -574,6 +609,10 @@ def run_iterative_discovery(
         rounds_trace.append(cov)
 
         # Termination & ARDE-ALG-01 refinement check
+        if http_budget_exhausted:
+            termination_reason = TERM_BUDGET_EXHAUSTED
+            break
+
         if round_queries_run == 0 and not query_queue and new_raw_this_round == 0:
             if provider_failures and len(buckets["RAW_CANDIDATES"]) == 0:
                 termination_reason = TERM_PROVIDER_FAILURE
