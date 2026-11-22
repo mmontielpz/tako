@@ -1,17 +1,17 @@
 # Security Policy
 
-TAKO is pre-alpha and contains no executable application code yet. Security still matters for repository hygiene and for the design of future components.
+TAKO is an experimental open-source Agentic Research Development Environment (ARDE) CLI (`0.0.1.dev10` on `develop`, hosted at `https://github.com/mmontielpz/tako`). See [Security Limitations](docs/architecture/SECURITY_LIMITATIONS.md) for current trust boundaries and known rollback limitations.
 
 ## Reporting a vulnerability
 
-Do not open a public issue for a security problem. Use GitHub's private vulnerability reporting ("Security" tab → "Report a vulnerability") once the repository is published. Until then, there is no public reporting channel because the repository is not public.
+Do not open a public issue for a security problem. Report security vulnerabilities privately via GitHub's **Security** tab ("Security" → "Report a vulnerability") on `mmontielpz/tako`.
 
 ## Scope
 
 - Accidentally committed secrets or private data.
-- Unsafe defaults in documented designs (permissions, isolation, secret handling).
-- Vulnerabilities in code, once code exists.
+- Unsafe defaults in configuration, CLI permissions, isolation, or secret handling.
+- Vulnerabilities in Python CLI modules, Rust engine/bridge code, or packaging/CI workflows.
 
 ## Principles
 
-Secure by default: explicit permissions, isolation, no secrets in the repository, human-controlled authorization.
+Secure by default: explicit permissions, no secrets in user config or research workspaces, human-controlled authorization for paid/live operations, and honest reporting of known limitations.

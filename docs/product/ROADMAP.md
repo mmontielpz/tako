@@ -98,3 +98,26 @@ Cloud/data integrations, multi-agent orchestration, team features, marketplace, 
 
 - **Internal (`INTERNAL_BENCHMARK_SEQUENCE=B02,B04,B05,B06`):** Efficient Computer Vision, Efficient AI, Edge AI, Physical AI.
 - **External (`EXTERNAL_BENCHMARK_SEQUENCE=B01,B03`):** Quantum Reservoir Computing, Soccer Analytics.
+
+---
+
+## Owner Scope Update (`M025C` — CachyOS-First Owner Pilot for JetSeg)
+
+Supersedes conflicting pilot, platform, or release preparation notes above:
+
+- **`PRIMARY_PILOT_RESEARCHER`:** `OWNER`
+- **`PRIMARY_PILOT_PLATFORM`:** `CACHYOS`
+- **`PRIMARY_PILOT_PROJECT`:** `JETSEG_EVOLUTION` (Real-Time Semantic Segmentation, Efficient Deep Learning, Edge AI, TinyML, Physical AI, Resource-Constrained Computer Vision)
+- **`PRIMARY_INTERFACE`:** `CLI`
+- **Frozen / Deferred Workstreams:**
+  - `SECONDARY_RESEARCHER_PILOT=FROZEN`
+  - `BROTHER_PILOT=FROZEN`
+  - `WINDOWS_NEW_DEVELOPMENT=FROZEN` (preserve existing Windows CI checks and historical evidence; no new Windows installer/UX work)
+  - `UBUNTU_NEW_DEVELOPMENT=FROZEN` (preserve existing Ubuntu CI checks and historical evidence; no new Ubuntu installer/UX work)
+  - `DESKTOP_DEVELOPMENT=FROZEN`
+  - `GUI_UI_UX_DEVELOPMENT=FROZEN`
+  - `FORMAL_BENCHMARK_PROGRAM=DEFERRED`
+  - `AI_SDLC_LITE_MODIFICATIONS=FORBIDDEN` (`AI_SDLC_LITE_EXPERIENCE_CAPTURE=ACTIVE`, `AI_SDLC_LITE_EVOLUTION=DEFERRED` until after P5 JetSeg pilot evidence)
+- **Next Mission (`M026` — `TAKO-EXPERIMENTAL-CLI-RELEASE-AND-CACHYOS-RESEARCHER-STARTER-KIT-026`):**
+  - CachyOS-first experimental CLI release with minimal local Linux installer (isolated Python venv; no `sudo`, `pacman`, or global `pip`), verified wheel & SHA-256 checksums, Setup Wizard, Doctor, AGY & GitHub Copilot starter prompts, standalone CLI workflow, native CachyOS installation qualification, JetSeg research workspace initialization, and lightweight researcher feedback mechanism.
+
