@@ -28,10 +28,10 @@ class M029BObservabilityWorkspaceTests(unittest.TestCase):
                     em.emit("stage_completed", stage="iterative_search", status="COMPLETED", counters={"http_attempts": 0, "accepted_papers": 1})
                     em.emit("workflow_completed", stage="discovery", status="COMPLETED")
                 self.assertNotIn("\033[", buf.getvalue())
+                self.assertNotIn("sk-secret-val", sanitize_error("Error with sk-secret-val"))
             events = [json.loads(line) for line in ev_path.read_text(encoding="utf-8").splitlines()]
             self.assertEqual([e["event_type"] for e in events], ["workflow_started", "stage_started", "stage_completed", "workflow_completed"])
             self.assertTrue(all(e["schema_version"] == EVENT_SCHEMA_VERSION and e["run_id"] == "run-1" for e in events))
-            self.assertNotIn("sk-secret-val", sanitize_error("Error with sk-secret-val"))
 
     def test_workspace_registration_json_collision_stale_and_interrupted(self):
         with tempfile.TemporaryDirectory() as tmp:
