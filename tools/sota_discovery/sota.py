@@ -650,8 +650,9 @@ def main(argv: list[str] | None = None) -> int:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--topic", required=True, help="Research topic")
-    parser.add_argument("--objective", required=True, help="Research objective")
+    parser.add_argument("--topic", default=None, help="Research topic (defaults to workspace topic when --workspace is set)")
+    parser.add_argument("--objective", default=None, help="Research objective (defaults to workspace objective when --workspace is set)")
+    parser.add_argument("--workspace", type=pathlib.Path, default=None, help="Optional TAKO workspace directory (tako_workspace.json)")
     parser.add_argument("--max-papers", type=int, default=10, help="Maximum accepted/exported papers (default: 10)")
     parser.add_argument(
         "--max-results-per-query",
@@ -665,7 +666,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Comma-separated discovery sources (defaults to user config or 'openalex'; supported: openalex,arxiv,crossref,semantic-scholar)",
     )
     parser.add_argument("--seed", action="append", default=[], help="Related topic seed (repeatable)")
-    parser.add_argument("--out-dir", default="sota_output", help="Output directory")
+    parser.add_argument("--out-dir", default=None, help="Output directory (defaults to <workspace>/sota_output or ./sota_output)")
     parser.add_argument("--fixture", type=pathlib.Path, default=None, help="Optional offline JSON fixture for testing")
     parser.add_argument("--iterative", action="store_true", help="Run bounded coverage-aware iterative discovery (Increment B)")
     parser.add_argument("--max-rounds", type=int, default=3, help="Maximum discovery rounds (default: 3)")
@@ -678,7 +679,32 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--citation-depth", type=int, default=1, help="Citation exploration depth (default: 1)")
     parser.add_argument("--no-review-first", action="store_true", help="Disable review-first discovery seed step")
+    parser.add_argument("--force", action="store_true", help="Allow overwriting non-empty output directory")
+    parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON output only")
+    parser.add_argument("--events-file", type=pathlib.Path, default=None, help="Optional JSONL path for workflow events")
     args = parser.parse_args(argv)
+
+    from tools.research_workspace import ensure_safe_out_dir, load_workspace, register_workflow_stage
+    from tools.workflow_events import WorkflowEventEmitter, make_run_id, sanitize_error
+
+    ws_manifest = None
+    if args.workspace is not None:
+        try:
+            ws_manifest = load_workspace(args.workspace)
+        except Exception as exc:
+            print(f"WORKSPACE_ERROR: {exc}", file=sys.stderr)
+            return 2
+        if args.topic is None:
+            args.topic = ws_manifest["topic"]
+        if args.objective is None:
+            args.objective = ws_manifest["objective"]
+
+    if not args.topic or not args.objective:
+        print("ERROR: --topic and --objective are required (or pass --workspace with tako_workspace.json).", file=sys.stderr)
+        return 2
+
+    if args.out_dir is None:
+        args.out_dir = str((args.workspace / "sota_output") if args.workspace is not None else pathlib.Path("sota_output"))
 
     if args.max_papers < 1 or args.max_rounds < 1 or args.max_requests < 1:
         print("ERROR: --max-papers, --max-rounds, and --max-requests must be >= 1", file=sys.stderr)
@@ -709,111 +735,230 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    if args.iterative:
-        from tools.sota_discovery.engine import build_research_plan, run_iterative_discovery, write_discovery_artifacts
-        from tools.sota_discovery.providers import UnsupportedProviderOperationError, get_provider, run_multi_source_search
+    run_id = make_run_id("sota")
+    events_path = args.events_file
+    if events_path is None and args.workspace is not None:
+        events_path = args.workspace / "runs" / f"{run_id}_events.jsonl"
+    emitter = WorkflowEventEmitter(
+        workflow="sota",
+        workspace_id=(ws_manifest["research_id"] if ws_manifest else "standalone"),
+        run_id=run_id,
+        events_file=events_path,
+        json_mode=args.json,
+    )
 
+    out_dir_path = pathlib.Path(args.out_dir)
+    if args.workspace is not None or args.force:
         try:
-            plan = build_research_plan(
+            ensure_safe_out_dir(out_dir_path, force=args.force)
+        except Exception as exc:
+            print(f"OUTPUT_ERROR: {exc}", file=sys.stderr)
+            return 2
+
+    emitter.emit(
+        "workflow_started",
+        stage="discovery",
+        status="RUNNING",
+        message=f"Topic: {args.topic} | Sources: {','.join(effective_cfg['sources']) if args.fixture is None else 'fixture'}",
+    )
+    if args.workspace is not None:
+        register_workflow_stage(args.workspace, "discovery", status="RUNNING", run_id=run_id, out_dir=out_dir_path)
+
+    try:
+        if args.iterative:
+            from tools.sota_discovery.engine import build_research_plan, run_iterative_discovery, write_discovery_artifacts
+            from tools.sota_discovery.providers import UnsupportedProviderOperationError, get_provider, run_multi_source_search
+
+            try:
+                plan = build_research_plan(
+                    topic=args.topic,
+                    objective=args.objective,
+                    seeds=args.seed,
+                    max_papers=args.max_papers,
+                    max_results_per_query=args.max_results_per_query,
+                    max_accepted_papers=args.max_papers,
+                    max_exported_papers=args.max_papers,
+                    max_rounds=args.max_rounds,
+                    max_requests=args.max_requests,
+                    citation_depth=args.citation_depth,
+                    prefer_review_first=not args.no_review_first,
+                )
+            except ValueError as exc:
+                err_s = sanitize_error(exc)
+                emitter.emit("stage_failed", stage="iterative_search", status="FAILED", error=err_s, message=err_s)
+                if args.workspace is not None:
+                    register_workflow_stage(args.workspace, "discovery", status="FAILED", run_id=run_id, out_dir=out_dir_path, error=err_s)
+                print(f"ERROR: {exc}", file=sys.stderr)
+                return 2
+
+            effective_max_http = effective_cfg["max_http_requests"]
+            if effective_max_http is not None:
+                plan["limits"]["max_http_requests"] = effective_max_http
+
+            sources = list(effective_cfg["sources"])
+            if not sources:
+                sources = ["openalex"]
+            plan["sources"] = sources
+
+            emitter.emit(
+                "stage_started",
+                stage="iterative_search",
+                status="RUNNING",
+                message=f"Running iterative discovery (max_rounds={args.max_rounds}, http_budget={effective_max_http})",
+            )
+
+            search_fn = None
+            citation_fn = fetch_openalex_citations if (args.fixture is None and args.citation_depth >= 1 and "openalex" in sources) else None
+            tracker = HttpRequestTracker(max_http_requests=effective_max_http) if args.fixture is None else None
+            multi_errors: list[str] = []
+            if args.fixture is not None:
+                fx_data = json.loads(args.fixture.read_text(encoding="utf-8"))
+                fx_list = list(fx_data.get("results", fx_data) if isinstance(fx_data, dict) else fx_data)
+                search_fn = lambda q, n: fx_list[:n]
+            elif sources != ["openalex"]:
+                try:
+                    providers = [get_provider(pid) for pid in sources]
+                except (ValueError, UnsupportedProviderOperationError) as exc:
+                    err_s = sanitize_error(exc)
+                    emitter.emit("stage_failed", stage="iterative_search", status="FAILED", error=err_s, message=err_s)
+                    if args.workspace is not None:
+                        register_workflow_stage(args.workspace, "discovery", status="FAILED", run_id=run_id, out_dir=out_dir_path, error=err_s)
+                    print(f"ERROR: {exc}", file=sys.stderr)
+                    return 2
+
+                def _multi_search(q: str, n: int) -> list[dict[str, Any]]:
+                    assert tracker is not None
+                    hits, errs = run_multi_source_search(q, n, providers, tracker=tracker)
+                    multi_errors.extend(errs)
+                    if not hits and errs:
+                        raise RetrievalError("; ".join(errs))
+                    return hits
+
+                search_fn = _multi_search
+
+            res = run_iterative_discovery(plan, search_fn=search_fn, citation_fn=citation_fn, tracker=tracker)
+            if multi_errors:
+                res["measurements"]["provider_failures"].extend(multi_errors)
+            disc_outs = write_discovery_artifacts(out_dir_path, res)
+            accepted_recs = list(res["buckets"]["ACCEPTED_CORPUS"].values())[: args.max_papers]
+            sota_outs = write_outputs(
+                out_dir=out_dir_path,
+                topic=args.topic,
+                objective=args.objective,
+                seeds=args.seed,
+                records=accepted_recs,
+                related_topics=[],
+                is_fixture=(args.fixture is not None),
+            )
+            disc_outs = write_discovery_artifacts(out_dir_path, res)
+            cov = res["coverage_report"]
+            if not cov["coverage_satisfied"]:
+                rep = out_dir_path / "sota_report.md"
+                rep.write_text(
+                    rep.read_text(encoding="utf-8")
+                    + f"\n> **Coverage Notice:** Accepted coverage is INSUFFICIENT ({cov['covered_count']}/{cov['target_count']} dimensions covered; termination={res['termination_reason']}).\n",
+                    encoding="utf-8",
+                )
+            all_outs = sorted({str(p) for p in (sota_outs + disc_outs)})
+            meas = res.get("measurements") or {}
+            tel = meas.get("observable_http_telemetry") or {}
+            sa = res.get("state_accounting") or {}
+            counters = {
+                "logical_search_requests": meas.get("search_requests", 0),
+                "http_attempts": tel.get("http_attempts", 0),
+                "http_budget": tel.get("max_http_requests", effective_max_http),
+                "accepted_papers": len(accepted_recs),
+                "rejected_papers": sa.get("excluded", 0),
+                "duplicates_removed": sa.get("duplicate_observations", 0),
+                "candidates": sa.get("candidates_for_limited_use", 0),
+            }
+            emitter.emit(
+                "stage_completed",
+                stage="iterative_search",
+                status="COMPLETED",
+                counters=counters,
+                artifacts=all_outs,
+                message=f"Completed: accepted={len(accepted_recs)}, candidates={counters['candidates']}, duplicates={counters['duplicates_removed']}, http={counters['http_attempts']}/{counters['http_budget']}, termination={res['termination_reason']}",
+            )
+            emitter.emit("workflow_completed", stage="discovery", status="COMPLETED", counters=counters, artifacts=all_outs)
+            if args.workspace is not None:
+                register_workflow_stage(
+                    args.workspace,
+                    "discovery",
+                    status="COMPLETED",
+                    run_id=run_id,
+                    out_dir=out_dir_path,
+                    outputs=[pathlib.Path(p) for p in all_outs],
+                    summary={"termination": res["termination_reason"], **counters},
+                )
+            if args.json:
+                print(
+                    json.dumps(
+                        {
+                            "status": "SOTA_ITERATIVE_COMPLETE",
+                            "run_id": run_id,
+                            "termination": res["termination_reason"],
+                            "accepted": len(accepted_recs),
+                            "counters": counters,
+                            "outputs": all_outs,
+                        },
+                        indent=2,
+                        ensure_ascii=False,
+                    )
+                )
+                return 0
+            print(f"Summary: accepted={len(accepted_recs)} | candidates={counters['candidates']} | duplicates={counters['duplicates_removed']} | http={counters['http_attempts']}/{counters['http_budget']} | out_dir={out_dir_path}")
+            print(f"SOTA_ITERATIVE_COMPLETE termination={res['termination_reason']} accepted={len(accepted_recs)} outputs={all_outs}")
+            return 0
+
+        emitter.emit("stage_started", stage="single_pass_search", status="RUNNING", message="Running single-pass discovery")
+        try:
+            records, related, is_fixture = discover_works(
                 topic=args.topic,
                 objective=args.objective,
                 seeds=args.seed,
                 max_papers=args.max_papers,
-                max_results_per_query=args.max_results_per_query,
-                max_accepted_papers=args.max_papers,
-                max_exported_papers=args.max_papers,
-                max_rounds=args.max_rounds,
-                max_requests=args.max_requests,
-                citation_depth=args.citation_depth,
-                prefer_review_first=not args.no_review_first,
+                fixture_path=args.fixture,
             )
-        except ValueError as exc:
-            print(f"ERROR: {exc}", file=sys.stderr)
-            return 2
+        except RetrievalError as exc:
+            err_s = sanitize_error(exc)
+            emitter.emit("stage_failed", stage="single_pass_search", status="FAILED", error=err_s, message=err_s)
+            if args.workspace is not None:
+                register_workflow_stage(args.workspace, "discovery", status="FAILED", run_id=run_id, out_dir=out_dir_path, error=err_s)
+            print(f"RETRIEVAL_BLOCKED: {exc}", file=sys.stderr)
+            return 1
 
-        effective_max_http = effective_cfg["max_http_requests"]
-        if effective_max_http is not None:
-            plan["limits"]["max_http_requests"] = effective_max_http
-
-        sources = list(effective_cfg["sources"])
-        if not sources:
-            sources = ["openalex"]
-        plan["sources"] = sources
-
-        search_fn = None
-        citation_fn = fetch_openalex_citations if (args.fixture is None and args.citation_depth >= 1 and "openalex" in sources) else None
-        tracker = HttpRequestTracker(max_http_requests=effective_max_http) if args.fixture is None else None
-        multi_errors: list[str] = []
-        if args.fixture is not None:
-            fx_data = json.loads(args.fixture.read_text(encoding="utf-8"))
-            fx_list = list(fx_data.get("results", fx_data) if isinstance(fx_data, dict) else fx_data)
-            search_fn = lambda q, n: fx_list[:n]
-        elif sources != ["openalex"]:
-            try:
-                providers = [get_provider(pid) for pid in sources]
-            except (ValueError, UnsupportedProviderOperationError) as exc:
-                print(f"ERROR: {exc}", file=sys.stderr)
-                return 2
-
-            def _multi_search(q: str, n: int) -> list[dict[str, Any]]:
-                assert tracker is not None
-                hits, errs = run_multi_source_search(q, n, providers, tracker=tracker)
-                multi_errors.extend(errs)
-                if not hits and errs:
-                    raise RetrievalError("; ".join(errs))
-                return hits
-
-            search_fn = _multi_search
-
-        res = run_iterative_discovery(plan, search_fn=search_fn, citation_fn=citation_fn, tracker=tracker)
-        if multi_errors:
-            res["measurements"]["provider_failures"].extend(multi_errors)
-        out_dir = pathlib.Path(args.out_dir)
-        disc_outs = write_discovery_artifacts(out_dir, res)
-        accepted_recs = list(res["buckets"]["ACCEPTED_CORPUS"].values())[: args.max_papers]
-        sota_outs = write_outputs(
-            out_dir=out_dir,
+        outputs = write_outputs(
+            out_dir=out_dir_path,
             topic=args.topic,
             objective=args.objective,
             seeds=args.seed,
-            records=accepted_recs,
-            related_topics=[],
-            is_fixture=(args.fixture is not None),
+            records=records,
+            related_topics=related,
+            is_fixture=is_fixture,
         )
-        # Re-write discovery bib files so write_outputs does not overwrite segregated accepted/candidate split
-        disc_outs = write_discovery_artifacts(out_dir, res)
-        cov = res["coverage_report"]
-        if not cov["coverage_satisfied"]:
-            rep = out_dir / "sota_report.md"
-            rep.write_text(
-                rep.read_text(encoding="utf-8")
-                + f"\n> **Coverage Notice:** Accepted coverage is INSUFFICIENT ({cov['covered_count']}/{cov['target_count']} dimensions covered; termination={res['termination_reason']}).\n",
-                encoding="utf-8",
+        out_strs = [str(p) for p in outputs]
+        counters = {"accepted_papers": len(records), "rejected_papers": 0, "duplicates_removed": 0}
+        emitter.emit("stage_completed", stage="single_pass_search", status="COMPLETED", counters=counters, artifacts=out_strs, message=f"Completed: papers={len(records)}, out_dir={out_dir_path}")
+        emitter.emit("workflow_completed", stage="discovery", status="COMPLETED", counters=counters, artifacts=out_strs)
+        if args.workspace is not None:
+            register_workflow_stage(
+                args.workspace,
+                "discovery",
+                status="COMPLETED",
+                run_id=run_id,
+                out_dir=out_dir_path,
+                outputs=outputs,
+                summary={"papers": len(records), "fixture": is_fixture},
             )
-        all_outs = sorted({str(p) for p in (sota_outs + disc_outs)})
-        print(f"SOTA_ITERATIVE_COMPLETE termination={res['termination_reason']} accepted={len(accepted_recs)} outputs={all_outs}")
+        if args.json:
+            print(json.dumps({"status": "SOTA_COMPLETE", "run_id": run_id, "papers": len(records), "fixture": is_fixture, "outputs": out_strs}, indent=2, ensure_ascii=False))
+            return 0
+        print(f"SOTA_COMPLETE papers={len(records)} fixture={is_fixture} outputs={out_strs}")
         return 0
-
-    try:
-        records, related, is_fixture = discover_works(
-            topic=args.topic,
-            objective=args.objective,
-            seeds=args.seed,
-            max_papers=args.max_papers,
-            fixture_path=args.fixture,
-        )
-    except RetrievalError as exc:
-        print(f"RETRIEVAL_BLOCKED: {exc}", file=sys.stderr)
-        return 1
-
-    outputs = write_outputs(
-        out_dir=pathlib.Path(args.out_dir),
-        topic=args.topic,
-        objective=args.objective,
-        seeds=args.seed,
-        records=records,
-        related_topics=related,
-        is_fixture=is_fixture,
-    )
-    print(f"SOTA_COMPLETE papers={len(records)} fixture={is_fixture} outputs={[str(p) for p in outputs]}")
-    return 0
+    except KeyboardInterrupt:
+        emitter.emit("workflow_interrupted", stage="discovery", status="INTERRUPTED", message="Interrupted by user")
+        if args.workspace is not None:
+            register_workflow_stage(args.workspace, "discovery", status="INTERRUPTED", run_id=run_id, out_dir=out_dir_path, error="Interrupted by user")
+        print("SOTA_INTERRUPTED: Run interrupted by user.", file=sys.stderr)
+        return 130

@@ -172,6 +172,44 @@ def save_workspace(workspace_dir: pathlib.Path, manifest: dict[str, Any]) -> pat
     return manifest_p
 
 
+ensure_safe_out_dir = _ensure_safe_out_dir
+
+
+def register_workflow_stage(
+    workspace_dir: pathlib.Path,
+    stage_name: str,
+    *,
+    status: str,
+    run_id: str,
+    out_dir: pathlib.Path | None = None,
+    outputs: list[pathlib.Path] | None = None,
+    summary: dict[str, Any] | None = None,
+    error: str | None = None,
+) -> pathlib.Path:
+    """Update stage state in tako_workspace.json without breaking v1 compatibility."""
+    manifest = load_workspace(workspace_dir)
+    stages = manifest.setdefault("stages", {})
+    prev = stages.get(stage_name) or {}
+    rel_outputs = [_to_ws_rel(p, workspace_dir) for p in (outputs or [])] if outputs is not None else prev.get("outputs", [])
+    rel_out_dir = _to_ws_rel(out_dir, workspace_dir) if out_dir is not None else prev.get("out_dir")
+    entry: dict[str, Any] = {
+        "status": status,
+        "run_id": run_id,
+        "updated_at": _utc_now(),
+        "outputs": rel_outputs,
+    }
+    if rel_out_dir:
+        entry["out_dir"] = rel_out_dir
+    if summary:
+        entry["summary"] = summary
+    if error:
+        entry["error"] = error
+    stages[stage_name] = entry
+    if status == "COMPLETED" and rel_out_dir and stage_name in ("evidence", "discovery"):
+        manifest.setdefault("last_run_dir", rel_out_dir)
+    return save_workspace(workspace_dir, manifest)
+
+
 def _parse_bibtex(text: str, source_name: str) -> list[dict[str, Any]]:
     entries: list[dict[str, Any]] = []
     for idx, m in enumerate(re.finditer(r"@(\w+)\s*\{\s*([^,]+)\s*,([\s\S]*?)\n\}", text), start=1):
@@ -388,20 +426,42 @@ def cmd_init(argv: list[str] | None = None) -> int:
 def cmd_status(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="tako status", description="Inspect TAKO research workspace state")
     parser.add_argument("--workspace", type=pathlib.Path, default=pathlib.Path("."), help="Workspace directory")
+    parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON status")
     args = parser.parse_args(argv)
     try:
         m = load_workspace(args.workspace)
     except Exception as exc:
         print(f"STATUS_ERROR: {exc}", file=sys.stderr)
         return 2
+
+    stages_view: dict[str, dict[str, Any]] = {}
+    for name, st in (m.get("stages") or {}).items():
+        status_val = str(st.get("status") or "NOT_STARTED")
+        outs = list(st.get("outputs") or [])
+        missing = [o for o in outs if not _from_ws_rel(o, args.workspace).exists()] if outs else []
+        if status_val == "COMPLETED" and outs and missing:
+            status_val = "STALE"
+        stages_view[name] = {
+            **st,
+            "effective_status": status_val,
+            "missing_outputs": missing,
+        }
+
+    if args.json:
+        print(json.dumps({**m, "stages_effective": stages_view}, indent=2, ensure_ascii=False))
+        return 0
+
     print(f"Research ID:  {m['research_id']}")
     print(f"Topic:        {m['topic']}")
     print(f"Objective:    {m['objective']}")
     print(f"TAKO Version: {m['tako_version']}")
     print(f"Quality:      {m['quality_status'].get('verdict')} ({m['quality_status'].get('report_qualification')})")
     print("Stages:")
-    for name, st in (m.get("stages") or {}).items():
-        print(f"  - {name}: {st.get('status')} (outputs={len(st.get('outputs') or [])})")
+    for name, st in stages_view.items():
+        extra = f", run_id={st['run_id']}" if st.get("run_id") else ""
+        if st.get("missing_outputs"):
+            extra += f", missing={len(st['missing_outputs'])}"
+        print(f"  - {name}: {st['effective_status']} (outputs={len(st.get('outputs') or [])}{extra})")
     print(f"Evidence Sources: {len(m.get('evidence_sources') or [])}")
     return 0
 

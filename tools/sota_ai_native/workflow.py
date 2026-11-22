@@ -719,8 +719,9 @@ def main(argv: list[str] | None = None) -> int:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--topic", required=True)
-    parser.add_argument("--objective", required=True)
+    parser.add_argument("--topic", default=None)
+    parser.add_argument("--objective", default=None)
+    parser.add_argument("--workspace", type=pathlib.Path, default=None, help="Optional TAKO workspace directory (tako_workspace.json)")
     parser.add_argument("--max-papers", type=int, default=10)
     parser.add_argument(
         "--provider",
@@ -744,8 +745,33 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--allow-paid-api", action="store_true", help="Explicitly authorize direct metered API calls (e.g. openai-responses)")
     parser.add_argument("--fixture", type=pathlib.Path, default=None, help="Offline JSON fixture for --provider fixture (defaults to bundled example_fixture.json)")
-    parser.add_argument("--out-dir", default="sota_ai_native_output")
+    parser.add_argument("--out-dir", default=None)
+    parser.add_argument("--force", action="store_true", help="Allow overwriting non-empty output directory")
+    parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON output only")
+    parser.add_argument("--events-file", type=pathlib.Path, default=None, help="Optional JSONL path for workflow events")
     args = parser.parse_args(argv)
+
+    from tools.research_workspace import ensure_safe_out_dir, load_workspace, register_workflow_stage
+    from tools.workflow_events import WorkflowEventEmitter, make_run_id, sanitize_error
+
+    ws_manifest = None
+    if args.workspace is not None:
+        try:
+            ws_manifest = load_workspace(args.workspace)
+        except Exception as exc:
+            print(f"WORKSPACE_ERROR: {exc}", file=sys.stderr)
+            return 2
+        if args.topic is None:
+            args.topic = ws_manifest["topic"]
+        if args.objective is None:
+            args.objective = ws_manifest["objective"]
+
+    if not args.topic or not args.objective:
+        print("ERROR: --topic and --objective are required (or pass --workspace with tako_workspace.json).", file=sys.stderr)
+        return 2
+
+    if args.out_dir is None:
+        args.out_dir = str((args.workspace / "sota_ai_native_output") if args.workspace is not None else pathlib.Path("sota_ai_native_output"))
 
     if args.max_http_requests is not None and args.max_http_requests < 1:
         print("ERROR: --max-http-requests must be >= 1", file=sys.stderr)
@@ -775,7 +801,30 @@ def main(argv: list[str] | None = None) -> int:
         fixture_data = json.loads(fixture_path.read_text(encoding="utf-8"))
 
     out_dir = pathlib.Path(args.out_dir)
+    if args.workspace is not None or args.force:
+        try:
+            ensure_safe_out_dir(out_dir, force=args.force)
+        except Exception as exc:
+            print(f"OUTPUT_ERROR: {exc}", file=sys.stderr)
+            return 2
+
+    run_id = make_run_id("sota-ai")
+    events_path = args.events_file
+    if events_path is None and args.workspace is not None:
+        events_path = args.workspace / "runs" / f"{run_id}_events.jsonl"
+    emitter = WorkflowEventEmitter(
+        workflow="sota-ai",
+        workspace_id=(ws_manifest["research_id"] if ws_manifest else "standalone"),
+        run_id=run_id,
+        events_file=events_path,
+        json_mode=args.json,
+    )
+    emitter.emit("workflow_started", stage="discovery", status="RUNNING", message=f"Topic: {args.topic} | Provider: {args.provider}")
+    if args.workspace is not None:
+        register_workflow_stage(args.workspace, "discovery", status="RUNNING", run_id=run_id, out_dir=out_dir)
+
     try:
+        emitter.emit("stage_started", stage="researcher", status="RUNNING", message="Running Researcher stage")
         ts_r0 = time.monotonic()
         researcher_prompt = (
             f"Role: RESEARCHER. Topic: {args.topic}. Objective: {args.objective}. "
@@ -818,14 +867,24 @@ def main(argv: list[str] | None = None) -> int:
             reviewer_out, u3 = run_role("reviewer", reviewer_prompt, args.provider, args.model, args.allow_paid_api, fixture_data, allow_cli_session=args.allow_cli_session)
             _save_stage_json(out_dir, "stage_04_reviewer.json", {"elapsed_seconds": round(time.monotonic() - ts_v0, 3), "usage": u3, "payload": reviewer_out})
     except ProviderBlockedError as exc:
+        err_s = sanitize_error(exc)
+        emitter.emit("stage_failed", stage="discovery", status="FAILED", error=err_s, message=err_s)
+        if args.workspace is not None:
+            register_workflow_stage(args.workspace, "discovery", status="FAILED", run_id=run_id, out_dir=out_dir, error=err_s)
         print(f"PROVIDER_BLOCKED: {exc}", file=sys.stderr)
         return 1
+    except KeyboardInterrupt:
+        emitter.emit("workflow_interrupted", stage="discovery", status="INTERRUPTED", message="Interrupted by user")
+        if args.workspace is not None:
+            register_workflow_stage(args.workspace, "discovery", status="INTERRUPTED", run_id=run_id, out_dir=out_dir, error="Interrupted by user")
+        print("AI_NATIVE_INTERRUPTED: Run interrupted by user.", file=sys.stderr)
+        return 130
 
     elapsed = time.monotonic() - t0
     usage_records = [u1, u2] + ([u3] if u3 is not None else [])
     usage_totals = aggregate_usage_records(usage_records, wall_time_seconds=elapsed)
     outputs = write_ai_native_outputs(
-        out_dir=pathlib.Path(args.out_dir),
+        out_dir=out_dir,
         topic=args.topic,
         objective=args.objective,
         provider=args.provider,
@@ -836,5 +895,12 @@ def main(argv: list[str] | None = None) -> int:
         usage_totals=usage_totals,
         elapsed_seconds=elapsed,
     )
-    print(f"AI_NATIVE_COMPLETE provider={args.provider} reviewer={args.with_reviewer} outputs={[str(p) for p in outputs]}")
+    out_strs = [str(p) for p in outputs]
+    emitter.emit("workflow_completed", stage="discovery", status="COMPLETED", artifacts=out_strs, message=f"Completed: provider={args.provider}, out_dir={out_dir}")
+    if args.workspace is not None:
+        register_workflow_stage(args.workspace, "discovery", status="COMPLETED", run_id=run_id, out_dir=out_dir, outputs=outputs, summary={"provider": args.provider, "reviewer": args.with_reviewer})
+    if args.json:
+        print(json.dumps({"status": "AI_NATIVE_COMPLETE", "run_id": run_id, "provider": args.provider, "reviewer": args.with_reviewer, "elapsed_seconds": round(elapsed, 3), "outputs": out_strs}, indent=2, ensure_ascii=False))
+        return 0
+    print(f"AI_NATIVE_COMPLETE provider={args.provider} reviewer={args.with_reviewer} outputs={out_strs}")
     return 0
