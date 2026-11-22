@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import tempfile
@@ -23,7 +24,7 @@ def _build_versioned_wheel(dest_dir: pathlib.Path, version: str) -> pathlib.Path
         for py in sorted((REPO_ROOT / "tools").rglob("*.py")):
             rel = py.relative_to(REPO_ROOT).as_posix()
             if py.name == "cli.py":
-                text = py.read_text(encoding="utf-8").replace('__version__ = "0.1.0a1"', f'__version__ = "{version}"')
+                text = re.sub(r'__version__ = "[^"]+"', f'__version__ = "{version}"', py.read_text(encoding="utf-8"))
                 zf.writestr(rel, text)
             else:
                 zf.write(py, rel)

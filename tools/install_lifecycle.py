@@ -15,7 +15,7 @@ import urllib.error
 import urllib.request
 import venv
 
-DEFAULT_RELEASE_TAG = "v0.1.0a1"
+DEFAULT_RELEASE_TAG = "v0.1.0a2"
 DEFAULT_RELEASE_BASE_URL = "https://github.com/mmontielpz/tako/releases/download"
 
 

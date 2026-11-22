@@ -5,7 +5,11 @@ All notable changes to the public TAKO repository are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [PEP 440](https://peps.python.org/pep-0440/) / [SemVer](https://semver.org/) for releases.
 
-## [Unreleased] — `0.1.0a1` Experimental Alpha Candidate (P4 Closeout)
+## [0.1.0a2] — Experimental Alpha (`RX-001` Native Linux CLI Distribution)
+
+- Added universal Linux bootstrap installer (`install.sh`), `tako update`, and `tako uninstall` (`tools/install_lifecycle.py`) with SHA-256 verification, rollback-safe venv upgrades, and Bash/Zsh/Fish support.
+
+## [0.1.0a1] — Experimental Alpha (P4 Closeout)
 
 ### Added
 - Multi-source scientific discovery (`tools/sota_discovery/providers.py`) with `OpenAlex`, `arXiv` (Atom 1.0 XML), `Crossref`, optional `Semantic Scholar`, and `Google Scholar` manual-assisted URL/import contract, plus 20-source `PROVIDER_REGISTRY`.

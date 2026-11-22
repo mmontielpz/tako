@@ -7,7 +7,7 @@
 
 ## 2. Install TAKO
 
-### Native Linux Bootstrap (Recommended once `v0.1.0a2` is published)
+### Native Linux Bootstrap (Recommended for CachyOS & Ubuntu 24.04 LTS)
 See [Linux Distribution Guide](LINUX_DISTRIBUTION.md) for the download-inspect-execute alternative, `tako update`, `tako uninstall`, and integrity model:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/mmontielpz/tako/main/install.sh | bash
@@ -17,14 +17,14 @@ curl -fsSL https://raw.githubusercontent.com/mmontielpz/tako/main/install.sh | b
 ### Windows (PowerShell)
 ```powershell
 python -m venv .tako-venv
-.\.tako-venv\Scripts\python.exe -m pip install --no-deps tako_researcher_preview-0.1.0a1-py3-none-any.whl
+.\.tako-venv\Scripts\python.exe -m pip install --no-deps tako_researcher_preview-0.1.0a2-py3-none-any.whl
 .\.tako-venv\Scripts\tako.exe --version
 ```
 
 ### Ubuntu / Linux
 ```bash
 python3 -m venv .tako-venv
-.tako-venv/bin/pip install --no-deps tako_researcher_preview-0.1.0a1-py3-none-any.whl
+.tako-venv/bin/pip install --no-deps tako_researcher_preview-0.1.0a2-py3-none-any.whl
 .tako-venv/bin/tako --version
 ```
 
