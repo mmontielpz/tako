@@ -1,9 +1,11 @@
 """Offline regression tests for Increment B discovery intelligence (D01-D15)."""
 
+import io
 import json
 import pathlib
 import tempfile
 import unittest
+from unittest import mock
 
 from tools.sota_discovery.engine import (
     RF_APPLICABLE,
@@ -16,6 +18,7 @@ from tools.sota_discovery.engine import (
     TERM_PROVIDER_FAILURE,
     TERM_SATURATION,
     TERM_STAGNATION,
+    TERM_TARGET_COVERAGE_REACHED,
     build_research_plan,
     run_iterative_discovery,
     write_discovery_artifacts,
@@ -67,7 +70,7 @@ class DiscoveryIntelligenceTests(unittest.TestCase):
         )
         w1 = _work("W1", "Quantum Reservoir Computing Basics")
         res = run_iterative_discovery(plan, search_fn=lambda q, n: [w1])
-        self.assertEqual(res["termination_reason"], TERM_SATURATION)
+        self.assertEqual(res["termination_reason"], TERM_TARGET_COVERAGE_REACHED)
         self.assertEqual(res["state_accounting"]["accepted"], 1)
 
     def test_d02_duplicate_records_across_queries(self):
@@ -132,7 +135,7 @@ class DiscoveryIntelligenceTests(unittest.TestCase):
 
         res = run_iterative_discovery(plan, search_fn=search_fn)
         self.assertTrue(any(q["origin"] == "refinement:noise_dim" for q in res["executed_queries"]))
-        self.assertEqual(res["termination_reason"], TERM_SATURATION)
+        self.assertEqual(res["termination_reason"], TERM_TARGET_COVERAGE_REACHED)
         self.assertEqual(res["state_accounting"]["accepted"], 2)
 
     def test_d08_repeated_queries_prevented_and_stagnation(self):
@@ -270,6 +273,85 @@ class DiscoveryIntelligenceTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             for fn in ["research_plan.json", "discovery_trace.json", "screening_decisions.csv", "coverage_report.json", "references.bib", "references_candidates.bib", "sota_report.md"]:
                 self.assertTrue((out_dir / fn).is_file(), f"Missing {fn}")
+
+    def test_m021_r02_and_r03_verification_budget_and_alias_dedup(self):
+        plan = build_research_plan(
+            topic="Quantum Reservoir",
+            objective="Survey",
+            concept_groups={"core": ["quantum"], "missing": ["photonic"]},
+            prefer_review_first=False,
+            max_verification_requests=1,
+            max_rounds=1,
+        )
+        # Same paper returned without DOI and then with DOI -> 1 canonical identity; conflicting DOI -> 2nd identity
+        w_no_doi = {"id": "https://openalex.org/W1", "doi": "", "display_name": "Paper Alpha", "publication_year": 2022, "abstract": "Quantum reservoir method."}
+        w_with_doi = {"id": "https://openalex.org/W1", "doi": "https://doi.org/10.1000/alpha", "display_name": "Paper Alpha", "publication_year": 2022, "abstract": "Quantum reservoir method."}
+        w_conflict = {"id": "https://openalex.org/W2", "doi": "https://doi.org/10.1000/conflict", "display_name": "Paper Alpha", "publication_year": 2022, "abstract": "Quantum reservoir method."}
+
+        res = run_iterative_discovery(
+            plan,
+            search_fn=lambda q, n: [w_no_doi, w_with_doi, w_conflict],
+            verify_doi_fn=lambda d: {"id": "W1", "display_name": "Paper Alpha", "publication_year": 2022, "doi": d, "authorships": []},
+        )
+        self.assertEqual(res["state_accounting"]["unique_canonical_identities"], 2)
+        self.assertEqual(res["measurements"]["verification_requests"], 1)
+        self.assertEqual(
+            res["measurements"]["total_external_requests"],
+            res["measurements"]["search_requests"] + res["measurements"]["verification_requests"] + res["measurements"]["citation_requests"],
+        )
+
+    def test_m021_r05_mocked_production_openalex_adapter_path(self):
+        seed_work = _work(
+            "https://openalex.org/W_SEED",
+            "Quantum Reservoir Computing Review",
+            wtype="review",
+            is_review=True,
+            concepts=("Quantum Spin",),
+        )
+        seed_work["referenced_works"] = ["https://openalex.org/W_BACK"]
+        seed_work["cited_by_api_url"] = "https://api.openalex.org/works?filter=cites:W_SEED"
+
+        back_work = _work("https://openalex.org/W_BACK", "Spin Foundations for Quantum Reservoir", abstract="Spin foundations for quantum reservoir.")
+        fwd_work = _work("https://openalex.org/W_FWD", "Forward Quantum Spin Paper", abstract="Quantum spin forward work.")
+
+        def fake_urlopen(req, timeout=10.0):
+            url = req.full_url if hasattr(req, "full_url") else str(req)
+            if "openalex:W_BACK" in url or "openalex%3AW_BACK" in url:
+                payload = {"results": [back_work]}
+            elif "cites:W_SEED" in url:
+                payload = {"results": [fwd_work, seed_work]}  # includes cycle back to seed_work
+            elif "search=" in url:
+                payload = {"results": [seed_work]}
+            else:
+                payload = {"results": []}
+
+            class _Resp:
+                status = 200
+                def read(self):
+                    return json.dumps(payload).encode("utf-8")
+                def __enter__(self):
+                    return self
+                def __exit__(self, *args):
+                    return False
+            return _Resp()
+
+        with mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            with tempfile.TemporaryDirectory() as tmp:
+                out_dir = pathlib.Path(tmp) / "oa_mock_out"
+                rc = sota_main([
+                    "--topic", "Quantum Reservoir",
+                    "--objective", "Survey spin methods",
+                    "--iterative",
+                    "--max-rounds", "2",
+                    "--citation-depth", "1",
+                    "--out-dir", str(out_dir),
+                ])
+                self.assertEqual(rc, 0)
+                trace = json.loads((out_dir / "discovery_trace.json").read_text(encoding="utf-8"))
+                self.assertEqual(trace["citation_exploration"]["capability"], "AVAILABLE")
+                self.assertGreaterEqual(len(trace["citation_exploration"]["edges"]), 2)
+                self.assertGreaterEqual(trace["citation_exploration"]["cycles_prevented"], 1)
+                self.assertEqual(trace["state_accounting"]["accepted"], 3)
 
 
 if __name__ == "__main__":

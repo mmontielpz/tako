@@ -38,6 +38,7 @@ SCREEN_INSUFFICIENT_EVIDENCE = "INSUFFICIENT_EVIDENCE"
 
 # Termination reasons
 TERM_SATURATION = "SATURATION"
+TERM_TARGET_COVERAGE_REACHED = "TARGET_COVERAGE_REACHED"
 TERM_STAGNATION = "STAGNATION"
 TERM_BUDGET_EXHAUSTED = "BUDGET_EXHAUSTED"
 TERM_MAX_ROUNDS_REACHED = "MAX_ROUNDS_REACHED"
@@ -65,6 +66,7 @@ def build_research_plan(
     max_papers: int = 10,
     max_rounds: int = 3,
     max_requests: int = 12,
+    max_verification_requests: int = 20,
     max_candidates: int = 100,
     citation_depth: int = 1,
     max_citation_nodes: int = 20,
@@ -115,7 +117,9 @@ def build_research_plan(
         "limits": {
             "max_papers": max_papers,
             "max_rounds": max_rounds,
+            "max_search_requests": max_requests,
             "max_requests": max_requests,
+            "max_verification_requests": max_verification_requests,
             "max_candidates": max_candidates,
             "citation_depth": citation_depth,
             "max_citation_nodes": max_citation_nodes,
@@ -124,16 +128,62 @@ def build_research_plan(
     }
 
 
-def _canonical_key(work: dict[str, Any]) -> str:
+def _work_aliases(work: dict[str, Any]) -> tuple[str, list[str], str]:
+    """Return (primary_canonical_key, all_aliases, doi_key)."""
     doi_norm = normalize_identifier(work.get("doi") or "")
-    if doi_norm["kind"] == "doi":
-        return doi_norm["normalized"]
+    doi_key = doi_norm["normalized"] if doi_norm["kind"] == "doi" else ""
     oa_id = str(work.get("id") or "").strip().lower()
-    if oa_id:
-        return oa_id
     title = re.sub(r"[^a-z0-9]+", " ", str(work.get("display_name") or work.get("title") or "").lower()).strip()
     year = str(work.get("publication_year") or "nd")
-    return f"{title}:{year}" if title else ""
+    ty_key = f"{title}:{year}" if title else ""
+    aliases = [a for a in (doi_key, oa_id, ty_key) if a]
+    primary = doi_key or oa_id or ty_key
+    return primary, aliases, doi_key
+
+
+def _register_raw_candidate(
+    buckets: dict[str, dict[str, dict[str, Any]]],
+    alias_map: dict[str, str],
+    work: dict[str, Any],
+    plan: dict[str, Any],
+    source_path: str,
+) -> tuple[bool, str]:
+    """Register work into RAW_CANDIDATES with alias deduplication and DOI-conflict guard."""
+    primary, aliases, doi_key = _work_aliases(work)
+    if not primary:
+        return False, ""
+
+    matched_cids = {alias_map[a] for a in aliases if a in alias_map}
+    if len(matched_cids) == 1:
+        existing_cid = next(iter(matched_cids))
+        existing_rec = buckets["RAW_CANDIDATES"][existing_cid]
+        existing_doi_norm = normalize_identifier(existing_rec["_raw_work"].get("doi") or "")
+        existing_doi = existing_doi_norm["normalized"] if existing_doi_norm["kind"] == "doi" else ""
+        # Conflict guard: do NOT merge if both have non-empty, different DOIs!
+        if doi_key and existing_doi and doi_key != existing_doi:
+            pass
+        else:
+            for a in aliases:
+                alias_map.setdefault(a, existing_cid)
+            if doi_key and not existing_doi:
+                existing_rec["_raw_work"]["doi"] = doi_key
+                existing_rec["DOI or source URL"] = doi_key
+            return False, existing_cid
+
+    # Ensure unique key if primary collides with a conflicting-DOI entry
+    cid = primary
+    if cid in buckets["RAW_CANDIDATES"]:
+        idx = 2
+        while f"{primary}#{idx}" in buckets["RAW_CANDIDATES"]:
+            idx += 1
+        cid = f"{primary}#{idx}"
+
+    rec = _work_to_record(work, plan, source_path)
+    rec["canonical_id"] = cid
+    buckets["RAW_CANDIDATES"][cid] = rec
+    for a in aliases:
+        alias_map.setdefault(a, cid)
+    return True, cid
 
 
 def _work_to_record(w: dict[str, Any], plan: dict[str, Any], source_path: str) -> dict[str, Any]:
@@ -173,7 +223,7 @@ def _work_to_record(w: dict[str, Any], plan: dict[str, Any], source_path: str) -
     is_review = bool(w.get("is_review") is True or pub_type == "review")
 
     return {
-        "canonical_id": _canonical_key(w),
+        "canonical_id": "",
         "Title": title,
         "Authors": authors,
         "Year": year if year is not None else "UNKNOWN",
@@ -310,9 +360,12 @@ def run_iterative_discovery(
     executed_queries: list[dict[str, Any]] = []
     repeated_queries_prevented = 0
     search_requests = 0
+    verification_requests = 0
+    citation_requests = 0
     raw_observations = 0
     duplicate_observations = 0
     provider_failures: list[str] = []
+    alias_map: dict[str, str] = {}
 
     visited_citation_nodes: set[str] = set()
     citation_edges: list[dict[str, str]] = []
@@ -347,10 +400,8 @@ def run_iterative_discovery(
                                 query_queue.append({"query_text": cname, "origin": "review_first_concept", "target_dimensions": []})
                     for w in rev_hits:
                         raw_observations += 1
-                        rec = _work_to_record(w, plan, "review_first")
-                        if rec["canonical_id"] and rec["canonical_id"] not in buckets["RAW_CANDIDATES"]:
-                            buckets["RAW_CANDIDATES"][rec["canonical_id"]] = rec
-                        else:
+                        added, _ = _register_raw_candidate(buckets, alias_map, w, plan, "review_first")
+                        if not added:
                             duplicate_observations += 1
                 else:
                     review_first_status = RF_UNAVAILABLE
@@ -391,13 +442,11 @@ def run_iterative_discovery(
                     if len(buckets["RAW_CANDIDATES"]) >= limits["max_candidates"]:
                         break
                     raw_observations += 1
-                    rec = _work_to_record(w, plan, f"search:round_{rnd}:{qtext}")
-                    cid = rec["canonical_id"]
-                    if not cid or cid in buckets["RAW_CANDIDATES"]:
+                    added, _ = _register_raw_candidate(buckets, alias_map, w, plan, f"search:round_{rnd}:{qtext}")
+                    if added:
+                        new_raw_this_round += 1
+                    else:
                         duplicate_observations += 1
-                        continue
-                    buckets["RAW_CANDIDATES"][cid] = rec
-                    new_raw_this_round += 1
             except Exception as exc:
                 round_errors += 1
                 q_rec["status"] = f"error:{exc}"
@@ -417,6 +466,7 @@ def run_iterative_discovery(
                     citation_cycles_prevented += 1
                     continue
                 visited_citation_nodes.add(scid)
+                citation_requests += 1
                 try:
                     c_out = citation_fn(seed_rec["_raw_work"]) or {}
                     for direction in ("backward", "forward"):
@@ -424,16 +474,14 @@ def run_iterative_discovery(
                             if len(buckets["RAW_CANDIDATES"]) >= limits["max_candidates"]:
                                 break
                             raw_observations += 1
-                            crec = _work_to_record(cw, plan, f"citation:{direction}:{scid}")
-                            ccid = crec["canonical_id"]
-                            citation_edges.append({"seed_id": scid, "target_id": ccid, "direction": direction})
+                            added, ccid = _register_raw_candidate(buckets, alias_map, cw, plan, f"citation:{direction}:{scid}")
+                            citation_edges.append({"seed_id": scid, "target_id": ccid or "unknown", "direction": direction})
                             if ccid in visited_citation_nodes or ccid == scid:
                                 citation_cycles_prevented += 1
-                            if not ccid or ccid in buckets["RAW_CANDIDATES"]:
+                            if added:
+                                new_raw_this_round += 1
+                            else:
                                 duplicate_observations += 1
-                                continue
-                            buckets["RAW_CANDIDATES"][ccid] = crec
-                            new_raw_this_round += 1
                 except Exception as exc:
                     provider_failures.append(f"citation:{scid}:{exc}")
 
@@ -461,14 +509,22 @@ def run_iterative_discovery(
 
             buckets["SCREENED_CANDIDATES"][cid] = rec
 
-            # Bibliographic identity verification
+            # Bibliographic identity verification (bounded by max_verification_requests)
             if verify_doi_fn is not None or verify_search_fn is not None:
-                bib_chk = verify_paper_identity(
-                    rec,
-                    fetch_by_doi_fn=verify_doi_fn or (lambda d: None),
-                    search_fn=verify_search_fn or (lambda q: []),
-                    seen_identities=seen_bib_identities,
-                )
+                if verification_requests < limits["max_verification_requests"]:
+                    verification_requests += 1
+                    bib_chk = verify_paper_identity(
+                        rec,
+                        fetch_by_doi_fn=verify_doi_fn or (lambda d: None),
+                        search_fn=verify_search_fn or (lambda q: []),
+                        seen_identities=seen_bib_identities,
+                    )
+                else:
+                    bib_chk = {
+                        "identity_verification_outcome": "UNVERIFIABLE",
+                        "discrepancy_evidence": ["verification_budget_exhausted"],
+                        "corrected_identity": None,
+                    }
             else:
                 # OpenAlex search records with valid id/doi + title + year are verified; missing ID/year -> unverifiable
                 has_auth_id = bool(rec["_raw_work"].get("doi") or rec["_raw_work"].get("id")) and rec["Year"] != "UNKNOWN"
@@ -524,7 +580,12 @@ def run_iterative_discovery(
             break
 
         if cov["coverage_satisfied"]:
-            termination_reason = TERM_SATURATION
+            # Scientific saturation requires diminishing gain without positive new gain in the final round;
+            # otherwise report TARGET_COVERAGE_REACHED (heuristic target satisfied, not full saturation).
+            if accepted_gain == 0 and new_raw_this_round == 0 and consecutive_stagnant_rounds >= 1:
+                termination_reason = TERM_SATURATION
+            else:
+                termination_reason = TERM_TARGET_COVERAGE_REACHED
             break
 
         # ARDE-ALG-01: positive discovery gain with insufficient accepted coverage triggers bounded refinement
@@ -606,6 +667,9 @@ def run_iterative_discovery(
             "covered_dimensions": final_cov["covered_count"],
             "target_dimensions": final_cov["target_count"],
             "search_requests": search_requests,
+            "verification_requests": verification_requests,
+            "citation_requests": citation_requests,
+            "total_external_requests": search_requests + verification_requests + citation_requests,
             "unique_queries": len(executed_queries),
             "repeated_queries_prevented": repeated_queries_prevented,
             "citation_nodes_visited": len(visited_citation_nodes),

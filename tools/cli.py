@@ -9,7 +9,7 @@ from tools.doctor import run_doctor
 from tools.sota_ai_native.workflow import main as sota_ai_main
 from tools.sota_discovery.sota import main as sota_main
 
-__version__ = "0.0.1.dev4"
+__version__ = "0.0.1.dev5"
 
 
 def main(argv: list[str] | None = None) -> int:

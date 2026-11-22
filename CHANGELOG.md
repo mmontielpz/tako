@@ -5,7 +5,7 @@ All notable changes to the public TAKO repository are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [PEP 440](https://peps.python.org/pep-0440/) / [SemVer](https://semver.org/) for releases.
 
-## [Unreleased] — Increment B Candidate (Discovery Intelligence, Proposed `0.0.1.dev5` / `0.1.0a1`)
+## [Unreleased] — `0.0.1.dev5` Candidate (Increment B: Discovery Intelligence)
 
 ### Added
 - Bounded, coverage-aware iterative discovery engine (`tools/sota_discovery/engine.py`) with:

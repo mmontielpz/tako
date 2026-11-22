@@ -1,4 +1,4 @@
-# Known Limitations (`0.0.1.dev4` Candidate)
+# Known Limitations (`0.0.1.dev5` Candidate)
 
 1. **Windows Runtime Not Tested:** Built as `py3-none-any` and verified on `Linux x86_64` (Python `3.14.10`). No Windows host was available (`WINDOWS_RUNTIME_STATUS=NOT_TESTED`).
 2. **Verified vs. Candidate Bibliography:** `references.bib` contains only bibliographically verified records (`BIBLIOGRAPHIC_STATUS=VERIFIED`). Unverified or mismatched records are written to `references_candidates.bib`. An empty `references.bib` is valid when no identities qualify and does not imply a complete review.

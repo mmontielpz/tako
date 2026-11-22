@@ -74,6 +74,43 @@ def fetch_openalex(query: str, per_page: int = 10, timeout: float = 15.0) -> lis
     return list(payload.get("results") or [])
 
 
+def fetch_openalex_citations(work: dict[str, Any], max_per_direction: int = 5, timeout: float = 10.0) -> dict[str, list[dict[str, Any]]]:
+    """Fetch bounded backward (referenced_works) and forward (cited_by_api_url) OpenAlex works."""
+    backward: list[dict[str, Any]] = []
+    forward: list[dict[str, Any]] = []
+
+    ref_ids = [str(r).strip() for r in (work.get("referenced_works") or []) if str(r).strip()][:max_per_direction]
+    if ref_ids:
+        short_ids = "|".join(r.rsplit("/", 1)[-1] for r in ref_ids)
+        params = urllib.parse.urlencode({"filter": f"openalex:{short_ids}", "per-page": str(max_per_direction)})
+        req = urllib.request.Request(
+            f"{OPENALEX_WORKS_URL}?{params}",
+            headers={"User-Agent": "TAKO-SOTA-Mini-MVP/0.1 (mailto:research-local@example.org)"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                if resp.status == 200:
+                    backward = list((json.loads(resp.read().decode("utf-8"))).get("results") or [])
+        except Exception:
+            pass
+
+    cited_by_url = str(work.get("cited_by_api_url") or "").strip()
+    if cited_by_url.startswith("https://api.openalex.org/"):
+        sep = "&" if "?" in cited_by_url else "?"
+        req = urllib.request.Request(
+            f"{cited_by_url}{sep}per-page={max_per_direction}",
+            headers={"User-Agent": "TAKO-SOTA-Mini-MVP/0.1 (mailto:research-local@example.org)"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                if resp.status == 200:
+                    forward = list((json.loads(resp.read().decode("utf-8"))).get("results") or [])
+        except Exception:
+            pass
+
+    return {"backward": backward, "forward": forward}
+
+
 def discover_works(
     topic: str,
     objective: str,
@@ -358,12 +395,13 @@ def main(argv: list[str] | None = None) -> int:
             return 2
 
         search_fn = None
+        citation_fn = fetch_openalex_citations if (args.fixture is None and args.citation_depth >= 1) else None
         if args.fixture is not None:
             fx_data = json.loads(args.fixture.read_text(encoding="utf-8"))
             fx_list = list(fx_data.get("results", fx_data) if isinstance(fx_data, dict) else fx_data)
             search_fn = lambda q, n: fx_list[:n]
 
-        res = run_iterative_discovery(plan, search_fn=search_fn)
+        res = run_iterative_discovery(plan, search_fn=search_fn, citation_fn=citation_fn)
         out_dir = pathlib.Path(args.out_dir)
         disc_outs = write_discovery_artifacts(out_dir, res)
         accepted_recs = list(res["buckets"]["ACCEPTED_CORPUS"].values())
