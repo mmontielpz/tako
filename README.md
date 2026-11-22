@@ -29,7 +29,33 @@ AI-assisted literature workflows often fabricate citations, conflate model recal
 
 ## Installation
 
-Install TAKO in an isolated virtual environment (`--no-deps`, Python `>= 3.9` required; see [Researcher Quickstart](docs/RESEARCHER_QUICKSTART.md)):
+### Native Linux CLI Bootstrap (CachyOS & Ubuntu 24.04 LTS)
+
+> **Note:** Available publicly once `v0.1.0a2` (`M028B`) is published. See [Linux Distribution Guide](docs/LINUX_DISTRIBUTION.md) for ownership boundaries, security/integrity disclosures, and offline Starter Kit recovery.
+
+```bash
+# Single-command bootstrap (after v0.1.0a2 release)
+curl -fsSL https://raw.githubusercontent.com/mmontielpz/tako/main/install.sh | bash
+```
+
+Download-inspect-execute alternative:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mmontielpz/tako/main/install.sh -o install-tako.sh
+less install-tako.sh
+bash install-tako.sh
+```
+
+Update and uninstall:
+
+```bash
+tako update
+tako uninstall
+```
+
+### Offline / Manual Virtual Environment Fallback (`--no-deps`, Python `>= 3.9`)
+
+See [Researcher Quickstart](docs/RESEARCHER_QUICKSTART.md) or the `TAKO-Researcher-Starter-Kit` archive:
 
 ```powershell
 # Windows (PowerShell)
@@ -39,7 +65,7 @@ python -m venv .tako-venv
 ```
 
 ```bash
-# Ubuntu / Linux
+# Linux (offline wheel / Starter Kit fallback)
 python3 -m venv .tako-venv
 .tako-venv/bin/pip install --no-deps tako_researcher_preview-0.1.0a1-py3-none-any.whl
 .tako-venv/bin/tako --version
