@@ -1,0 +1,28 @@
+# Thin shell around `tako-bridge`. Compiled and launched on Linux in TAKO-004B (see
+# docs/missions/TAKO-004B/REPORT.md); needs the system package `webkit2gtk-4.1`.
+[package]
+name = "tako-desktop"
+version = "0.0.1"
+edition = "2021"
+description = "TAKO desktop shell (Tauri 2)"
+license = "Apache-2.0"
+publish = false
+
+# Standalone: not part of the root workspace, so `cargo test` at the root never needs WebKit.
+[workspace]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[features]
+provider-auth-preview = ["tako-bridge/provider-auth-preview"]
+# Embed the built UI (what `tauri build` enables). Without it the shell loads the dev server URL.
+custom-protocol = ["tauri/custom-protocol"]
+# Explicit debug-only build, never a runtime endpoint or credential override.
+native-qualification = ["tako-bridge/native-qualification"]
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tako-bridge = { path = "../bridge" }
+serde_json = "1"

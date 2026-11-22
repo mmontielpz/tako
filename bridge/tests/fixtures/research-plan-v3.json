@@ -1,0 +1,23 @@
+{
+  "question": {"kind":"question","id":"00000000000000000000000000000001","version":1},
+  "selected_evidence": [],
+  "origin": {"kind":"fixture","description":"Offline test fixture; no AI generation or research performed","provider":null,"model":null},
+  "body": {
+    "objective":"Prepare a scoped literature plan for a fixture question",
+    "research_type":"literature_review","secondary_types":[],"intent":"exploratory",
+    "hypotheses":[],"evaluation_questions":["Which supplied material addresses the fixture question?"],
+    "methodology":"Select, appraise and synthesize supplied material; no retrieval or execution",
+    "method_requirements":[{"kind":"selection","description":"State eligibility"},{"kind":"appraisal","description":"Record source limitations"},{"kind":"synthesis","description":"Retain contrary evidence"}],
+    "assumptions":["Material will be supplied explicitly"],"limitations":["Illustrative fixture, no scientific findings"],
+    "data_requirements":["Explicitly supplied notes"],"resource_requirements":["Local record storage"],
+    "steps":[
+      {"id":"00000000000000000000000000000101","label":"Scope material","method":"Review eligibility","kind":"literature_review","input_refs":[],"dependencies":[],"completion_criterion":"Scope documented","included":true,"unsupported_requirements":[]},
+      {"id":"00000000000000000000000000000102","label":"Appraise material","method":"Review limitations","kind":"literature_review","input_refs":[],"dependencies":["00000000000000000000000000000101"],"completion_criterion":"Limitations documented","included":true,"unsupported_requirements":[]},
+      {"id":"00000000000000000000000000000103","label":"Draft synthesis","method":"Compare assertions","kind":"writing","input_refs":[],"dependencies":["00000000000000000000000000000102"],"completion_criterion":"Uncertainties retained","included":true,"unsupported_requirements":[]}
+    ],
+    "evidence_requirements":[{"id":"00000000000000000000000000000201","description":"Future source-linked assertions","input_refs":[],"criterion":"Every assertion traces to supplied material"}],
+    "validation_criteria":["Disclose missing and contradictory material"],"constraints":["No execution"],
+    "risks":["Insufficient coverage"],"uncertainties":["Scientific adequacy requires human judgement"],"unknowns":[],
+    "expected_deliverables":["Unapproved research plan"]
+  }
+}

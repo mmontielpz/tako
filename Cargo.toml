@@ -1,0 +1,19 @@
+[package]
+name = "tako-engine"
+version = "0.0.1"
+edition = "2021"
+description = "TAKO headless engineering engine (pre-alpha)"
+license = "Apache-2.0"
+publish = false
+rust-version = "1.80"
+
+[dependencies]
+# Reasons for each dependency are recorded in docs/missions/TAKO-003/REPORT.md.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+libc = "0.2"
+
+[workspace]
+members = [".", "bridge"]
+# src-tauri is built separately: it needs system WebKit libraries (see docs/missions/TAKO-004/REPORT.md).
+exclude = ["src-tauri"]

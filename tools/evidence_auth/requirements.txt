@@ -1,0 +1,3 @@
+# Optional offline authenticity tooling only; existing installed version tested.
+# Ed25519 uses the maintained cryptography implementation, not handwritten crypto.
+cryptography==50.0.2

@@ -1,0 +1,4 @@
+{
+  "identifier": "dev.tako.auth-preview",
+  "app": {"windows": [{"label":"main","url":"auth-preview.html","title":"TAKO — Provider Connection Preview","width":1100,"height":850,"minWidth":600,"minHeight":600}]}
+}

@@ -1,0 +1,34 @@
+# Secrets and local config
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+credentials*.json
+secrets.*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Build / dependency output (stack not yet chosen)
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+dist/
+build/
+target/
+
+# Local agent state
+.claude/settings.local.json
+
+# Desktop shell
+src-tauri/target/
+src-tauri/gen/
+ui/node_modules/
+ui/dist/
