@@ -55,7 +55,7 @@ Cloud/data integrations, multi-agent orchestration, team features, marketplace, 
 | `P1` | Scientific Integrity / Increment A / `dev4` | Resolve canonical `v0.0.1.dev3` scientific defects (`F01`–`F06`) before `0.0.1.dev4` |
 | `P2` | Discovery Intelligence / Increment B | Hybrid discovery, query expansion, snowballing, relevance improvements (`F07`) |
 | `P3` | Evidence and Comparative SOTA / Increment C | Auditable screening, structured extraction, comparative synthesis & gap analysis (`P3_ENGINEERING_IMPLEMENTATION_STATUS=COMPLETED_ON_DEVELOP`; formal scientific validation deferred to `P5`–`P6`) |
-| `P4` | CLI Product Readiness and Interoperability | Polished CLI workflows, export formats, native Windows CLI qualification (`M023` CLI Product Experience; provisional future increments: `M024` Runtime/Security/Provider Qualification, `M025` Open-Source Product Reconciliation, `M026` Experimental Release Qualification) |
+| `P4` | CLI Product Readiness and Interoperability | Polished CLI workflows, export formats, native Windows CLI qualification (`M023` CLI Product Experience: `P4_INCREMENT_1_STATUS=COMPLETED_ON_DEVELOP`; next mission: `TAKO-RUNTIME-SECURITY-PROVIDER-QUALIFICATION-024`; provisional future increments: `M025` Open-Source Product Reconciliation, `M026` Experimental Release Qualification) |
 | `P5` | Internal Scientific Benchmarks | Formal internal validation: `INTERNAL_BENCHMARK_SEQUENCE=B02,B04,B05,B06` |
 | `P6` | Refinement and External Scientific Validation | External baselines & evaluation: `EXTERNAL_BENCHMARK_SEQUENCE=B01,B03` |
 | `P7` | Desktop App | Connect Rust/Tauri desktop shell via versioned JSON boundary; native Desktop qualification |

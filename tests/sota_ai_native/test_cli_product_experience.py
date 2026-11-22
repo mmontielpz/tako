@@ -240,6 +240,97 @@ class CliProductExperienceTests(unittest.TestCase):
             ev2 = acquire_evidence(p2)
             self.assertEqual(ev2["document_completeness"], "PARTIAL_EXCERPT")
 
+    def test_m023_r01_workspace_conflict_and_directory_portability(self):
+        import shutil
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            ws1 = t / "ws_orig"
+            self.assertEqual(cli_main(["init", "--topic", "Quantum Computing", "--objective", "Survey QRC", "--workspace", str(ws1)]), 0)
+
+            # Conflicting topic in imported bundle must fail closed
+            bad_bundle = t / "conflict.json"
+            bad_bundle.write_text(json.dumps({"topic": "Different Topic", "objective": "Other", "papers": []}), encoding="utf-8")
+            self.assertEqual(cli_main(["evidence", "--workspace", str(ws1), "--input", str(bad_bundle)]), 2)
+
+            # Valid local evidence inside workspace -> move workspace -> status, resume, export work
+            ev_dir = ws1 / "evidence"
+            src = ev_dir / "note.md"
+            src.write_text("# QRC Note\nReservoir accuracy 95%.\n", encoding="utf-8")
+            self.assertEqual(cli_main(["evidence", "--workspace", str(ws1), "--source", str(src)]), 0)
+
+            ws2 = t / "ws_moved"
+            shutil.move(str(ws1), str(ws2))
+            self.assertEqual(cli_main(["status", "--workspace", str(ws2)]), 0)
+            self.assertEqual(cli_main(["evidence", "--workspace", str(ws2), "--source", str(ws2 / "evidence" / "note.md"), "--resume"]), 0)
+            self.assertEqual(cli_main(["export", "--workspace", str(ws2), "--out-dir", str(ws2 / "exports" / "moved_exp")]), 0)
+            self.assertTrue((ws2 / "exports" / "moved_exp" / "artifact_inventory.json").is_file())
+
+    def test_m023_r02_completeness_trust_boundary_and_jats_empty_body(self):
+        # Imported completeness_verified=True WITHOUT completeness_verification_evidence cannot promote
+        p_fake = {
+            "paper_id": "fake_v",
+            "Title": "Caller Claimed Complete",
+            "full_text": "[page 1]\nSection 1: Intro\nText.",
+            "completeness_verified": True,
+        }
+        ev_fake = acquire_evidence(p_fake)
+        self.assertEqual(ev_fake["document_completeness"], "DECLARED_COMPLETE_UNVERIFIED")
+
+        # Explicit completeness_verification_evidence + structured text yields VERIFIED_COMPLETE_PUBLICATION
+        p_ok = dict(p_fake, completeness_verification_evidence={
+            "status": "VERIFIED",
+            "method": "checksum_and_page_count",
+            "verifier": "test_harness",
+            "evidence_ref": "sha256:abc",
+        })
+        ev_ok = acquire_evidence(p_ok)
+        self.assertEqual(ev_ok["document_completeness"], "VERIFIED_COMPLETE_PUBLICATION")
+
+        # JATS XML with empty <body> must not be promoted to full text
+        with tempfile.TemporaryDirectory() as tmp:
+            jats = Path(tmp) / "no_body.xml"
+            jats.write_text("<article><front><article-meta><title-group><article-title>Only Abstract</article-title></title-group><abstract><p>Abs.</p></abstract></article-meta></front><body/></article>", encoding="utf-8")
+            papers, _ = ingest_local_evidence([jats])
+            ev_j = acquire_evidence(papers[0])
+            self.assertNotEqual(ev_j["availability_status"], "FULL_TEXT_AVAILABLE")
+
+    def test_m023_r03_recovery_after_failure_and_incompatible_schema(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            ws = t / "ws_rec"
+            self.assertEqual(cli_main(["init", "--topic", "T", "--objective", "O", "--workspace", str(ws)]), 0)
+            src = ws / "evidence" / "obs.txt"
+            src.write_text("Observation 1.", encoding="utf-8")
+            self.assertEqual(cli_main(["evidence", "--workspace", str(ws), "--source", str(src)]), 0)
+
+            # Inject failure on a later run (malformed JSON) -> prior outputs preserved, stage marked FAILED
+            bad = t / "bad.json"
+            bad.write_text("{bad", encoding="utf-8")
+            self.assertEqual(cli_main(["evidence", "--workspace", str(ws), "--input", str(bad), "--force"]), 2)
+            m = json.loads((ws / WORKSPACE_FILENAME).read_text(encoding="utf-8"))
+            self.assertEqual(m["stages"]["evidence"]["status"], "FAILED")
+            self.assertTrue((ws / "runs" / "evidence" / "sota_report.md").is_file())
+
+            # Successful deterministic stage restart via --resume with unchanged valid input
+            self.assertEqual(cli_main(["evidence", "--workspace", str(ws), "--source", str(src), "--resume"]), 0)
+            m2 = json.loads((ws / WORKSPACE_FILENAME).read_text(encoding="utf-8"))
+            self.assertEqual(m2["stages"]["evidence"]["status"], "COMPLETED")
+            self.assertEqual(m2["stages"]["evidence"]["recovery_mode"], "deterministic_stage_restart")
+
+            # Incompatible workspace schema version refused
+            m2["schema_version"] = "tako-workspace/v999"
+            (ws / WORKSPACE_FILENAME).write_text(json.dumps(m2), encoding="utf-8")
+            self.assertEqual(cli_main(["status", "--workspace", str(ws)]), 2)
+
+            # Parent-directory symlink rejected
+            real_dir = t / "real_dir"
+            real_dir.mkdir()
+            (real_dir / "f.txt").write_text("hi", encoding="utf-8")
+            sym_dir = t / "sym_dir"
+            sym_dir.symlink_to(real_dir)
+            with self.assertRaises(ValueError):
+                ingest_local_evidence([sym_dir / "f.txt"], base_dir=t)
+
 
 if __name__ == "__main__":
     unittest.main()

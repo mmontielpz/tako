@@ -173,11 +173,19 @@ def acquire_evidence(paper: dict[str, Any]) -> dict[str, Any]:
             observed_structure = "PAGINATED"
         else:
             observed_structure = "UNSTRUCTURED_TEXT"
-        if paper.get("completeness_verified") is True:
+        cve = paper.get("completeness_verification_evidence")
+        has_valid_cve = (
+            isinstance(cve, dict)
+            and str(cve.get("status") or "").strip().upper() == "VERIFIED"
+            and bool(str(cve.get("method") or "").strip())
+            and bool(str(cve.get("verifier") or "").strip())
+            and bool(str(cve.get("evidence_ref") or "").strip())
+        )
+        if paper.get("completeness_verified") is True and has_valid_cve and observed_structure != "UNSTRUCTURED_TEXT":
             doc_completeness = "VERIFIED_COMPLETE_PUBLICATION"
-        elif researcher_declared_completeness == "FULL_PUBLICATION":
+        elif researcher_declared_completeness == "FULL_PUBLICATION" or paper.get("completeness_verified") is True:
             doc_completeness = "DECLARED_COMPLETE_UNVERIFIED"
-            limitations.append("Researcher declared FULL_PUBLICATION without independent completeness verification.")
+            limitations.append("Completeness declared without independent verification evidence; not promoted to VERIFIED_COMPLETE_PUBLICATION.")
         else:
             doc_completeness = "PARTIAL_EXCERPT"
             limitations.append("Supplied full_text is a partial excerpt; complete publication retrieval not verified.")

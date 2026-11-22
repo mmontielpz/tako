@@ -40,22 +40,45 @@ def _sha256_file(path: pathlib.Path) -> str:
 
 
 def _safe_path(path: pathlib.Path, *, base_dir: pathlib.Path | None = None, must_exist: bool = True) -> pathlib.Path:
-    """Reject symlinks, traversal escaping base_dir, and missing files when required."""
+    """Reject symlinks (including parent symlinks), traversal escaping base_dir, and missing files."""
     if path.is_symlink():
         raise ValueError(f"Unsafe symlink path rejected: {path}")
+    # Check parent directories for symlinks (stop at base_dir if provided, or check non-root parents)
+    cur = path.parent
+    base_res = base_dir.resolve() if base_dir is not None else None
+    while cur and cur != cur.parent:
+        if cur.is_symlink():
+            if base_res is None or cur.resolve() == base_res or base_res in cur.resolve().parents:
+                raise ValueError(f"Unsafe parent-directory symlink rejected: {cur}")
+        if base_res is not None and cur.resolve() == base_res:
+            break
+        cur = cur.parent
     resolved = path.resolve()
     for part in path.parts:
-        if part == ".." and base_dir is not None:
-            base_res = base_dir.resolve()
+        if part == ".." and base_res is not None:
             if resolved != base_res and base_res not in resolved.parents:
                 raise ValueError(f"Path traversal outside workspace rejected: {path}")
-    if base_dir is not None:
-        base_res = base_dir.resolve()
+    if base_res is not None:
         if resolved != base_res and base_res not in resolved.parents:
             raise ValueError(f"Path outside workspace boundary rejected: {path}")
     if must_exist and not resolved.exists():
         raise FileNotFoundError(f"Path not found: {path}")
     return resolved
+
+
+def _to_ws_rel(path: pathlib.Path, ws_dir: pathlib.Path) -> str:
+    """Store workspace-relative path when inside ws_dir for directory portability."""
+    p_res = path.resolve()
+    ws_res = ws_dir.resolve()
+    try:
+        return p_res.relative_to(ws_res).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def _from_ws_rel(val: str, ws_dir: pathlib.Path) -> pathlib.Path:
+    p = pathlib.Path(val)
+    return p if p.is_absolute() else (ws_dir / p)
 
 
 def _ensure_safe_out_dir(out_dir: pathlib.Path, *, force: bool = False, resume: bool = False) -> pathlib.Path:
@@ -229,7 +252,7 @@ def _parse_jats_xml(text: str, source_name: str, file_hash: str) -> list[dict[st
     title = "".join(title_el.itertext()).strip() if title_el is not None else pathlib.Path(source_name).stem
     abstract = "".join(abs_el.itertext()).strip() if abs_el is not None else ""
     body = "".join(body_el.itertext()).strip() if body_el is not None else ""
-    return [{
+    rec: dict[str, Any] = {
         "paper_id": f"jats_{file_hash[:8]}",
         "Title": title,
         "Authors": ["UNKNOWN"],
@@ -241,7 +264,11 @@ def _parse_jats_xml(text: str, source_name: str, file_hash: str) -> list[dict[st
         "evidence_source": source_name,
         "retrieval_method": "local_jats_xml",
         "claims": [],
-    }]
+    }
+    if not body:
+        rec["Evidence availability"] = EVIDENCE_ABSTRACT_BASED if abstract else EVIDENCE_METADATA_ONLY
+        rec["extraction_limitations"] = ["JATS XML missing <body> content; full text unavailable."]
+    return [rec]
 
 
 def ingest_local_evidence(
@@ -403,7 +430,7 @@ def cmd_evidence(argv: list[str] | None = None) -> int:
             ev_stage = (ws_manifest.get("stages") or {}).get("evidence", {})
             recorded_hashes = ev_stage.get("input_hashes") or {}
             for src_path_str, old_hash in recorded_hashes.items():
-                sp = pathlib.Path(src_path_str)
+                sp = _from_ws_rel(src_path_str, args.workspace)
                 if not sp.is_file() or _sha256_file(sp) != old_hash:
                     print(f"RESUME_REFUSED: stale or missing input hash for {src_path_str}", file=sys.stderr)
                     return 2
@@ -431,12 +458,28 @@ def cmd_evidence(argv: list[str] | None = None) -> int:
                 raise ValueError(f"Malformed JSON in {args.input}: {exc}") from exc
             if not isinstance(loaded, dict) or not isinstance(loaded.get("papers"), list):
                 raise ValueError(f"Unexpected bundle schema in {args.input}: 'papers' list required.")
+            if ws_manifest is not None:
+                in_topic = str(loaded.get("topic") or "").strip()
+                in_obj = str(loaded.get("objective") or "").strip()
+                if in_topic and in_topic.lower() != ws_manifest["topic"].lower():
+                    raise ValueError(f"WORKSPACE_CONFLICT: input topic '{in_topic}' conflicts with workspace topic '{ws_manifest['topic']}'.")
+                if in_obj and in_obj.lower() != ws_manifest["objective"].lower():
+                    raise ValueError(f"WORKSPACE_CONFLICT: input objective '{in_obj}' conflicts with workspace objective '{ws_manifest['objective']}'.")
             bundle = loaded
-            input_hashes[str(args.input)] = _sha256_file(in_p)
+            h_key = _to_ws_rel(in_p, args.workspace) if args.workspace else str(args.input)
+            input_hashes[h_key] = _sha256_file(in_p)
 
         if args.from_workflow_dir:
             wf_p = _safe_path(args.from_workflow_dir, must_exist=True)
             wf_bundle = load_bundle_from_workflow_dir(wf_p)
+            if ws_manifest is not None:
+                plan_prov = (wf_bundle.get("discovery_provenance") or {}).get("research_plan") or {}
+                wf_topic = str(plan_prov.get("topic") or "").strip()
+                wf_obj = str(plan_prov.get("objective") or "").strip()
+                if wf_topic and wf_topic.lower() != ws_manifest["topic"].lower():
+                    raise ValueError(f"WORKSPACE_CONFLICT: workflow topic '{wf_topic}' conflicts with workspace topic '{ws_manifest['topic']}'.")
+                if wf_obj and wf_obj.lower() != ws_manifest["objective"].lower():
+                    raise ValueError(f"WORKSPACE_CONFLICT: workflow objective '{wf_obj}' conflicts with workspace objective '{ws_manifest['objective']}'.")
             if not args.input:
                 bundle["topic"] = ws_manifest["topic"] if ws_manifest else wf_bundle["topic"]
                 bundle["objective"] = ws_manifest["objective"] if ws_manifest else wf_bundle["objective"]
@@ -447,9 +490,10 @@ def cmd_evidence(argv: list[str] | None = None) -> int:
             src_papers, src_recs = ingest_local_evidence(args.source)
             bundle["papers"].extend(src_papers)
             for r in src_recs:
-                input_hashes[r["path"]] = r["sha256"]
+                h_key = _to_ws_rel(pathlib.Path(r["path"]), args.workspace) if args.workspace else r["path"]
+                input_hashes[h_key] = r["sha256"]
                 if ws_manifest is not None:
-                    ws_manifest["evidence_sources"].append(r)
+                    ws_manifest["evidence_sources"].append({"path": h_key, "sha256": r["sha256"], "format": r["format"]})
 
         res = run_evidence_and_comparative_pipeline(bundle)
         outs = write_evidence_outputs(out_dir, res)
@@ -464,8 +508,9 @@ def cmd_evidence(argv: list[str] | None = None) -> int:
     if ws_manifest is not None and args.workspace is not None:
         ws_manifest["stages"]["evidence"] = {
             "status": "COMPLETED",
-            "out_dir": str(out_dir),
-            "outputs": [str(p) for p in outs],
+            "recovery_mode": "deterministic_stage_restart" if args.resume else "fresh_execution",
+            "out_dir": _to_ws_rel(out_dir, args.workspace),
+            "outputs": [_to_ws_rel(p, args.workspace) for p in outs],
             "input_hashes": input_hashes,
         }
         ws_manifest["quality_status"] = {
@@ -498,7 +543,7 @@ def cmd_export(argv: list[str] | None = None) -> int:
         if src_dir is None:
             ev_out = (ws_manifest.get("stages") or {}).get("evidence", {}).get("out_dir")
             if ev_out:
-                src_dir = pathlib.Path(ev_out)
+                src_dir = _from_ws_rel(ev_out, args.workspace)
 
     if src_dir is None or not src_dir.is_dir():
         print("EXPORT_ERROR: source run directory not found. Pass --from-dir or run `tako evidence` in workspace.", file=sys.stderr)
@@ -535,7 +580,7 @@ def cmd_export(argv: list[str] | None = None) -> int:
     inv_p.write_text(json.dumps({"exported_from": str(src_dir), "format": args.format, "artifacts": exported}, indent=2) + "\n", encoding="utf-8")
 
     if ws_manifest is not None and args.workspace is not None:
-        ws_manifest["stages"]["export"] = {"status": "COMPLETED", "out_dir": str(dest), "outputs": [a["filename"] for a in exported] + ["artifact_inventory.json"]}
+        ws_manifest["stages"]["export"] = {"status": "COMPLETED", "out_dir": _to_ws_rel(dest, args.workspace), "outputs": [a["filename"] for a in exported] + ["artifact_inventory.json"]}
         save_workspace(args.workspace, ws_manifest)
 
     print(f"EXPORT_COMPLETE count={len(exported)} out_dir={dest}")
