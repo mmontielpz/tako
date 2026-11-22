@@ -57,9 +57,108 @@ def extract_by_cues(sentences: list[str], cues: tuple[str, ...], fallback: str) 
     return " ".join(matched[:2])
 
 
-def fetch_openalex(query: str, per_page: int = 10, timeout: float = 15.0) -> list[dict[str, Any]]:
+class HttpBudgetExhaustedError(RetrievalError):
+    """Raised before an HTTP attempt when the observable HTTP request budget is exhausted."""
+
+
+class HttpRequestTracker:
+    """Tracks observable HTTP transport attempts, retries, failures, redirects, and cache hits."""
+
+    def __init__(self, max_http_requests: int | None = None) -> None:
+        self.max_http_requests = max_http_requests
+        self.http_attempts = 0
+        self.http_successes = 0
+        self.http_failures = 0
+        self.retries = 0
+        self.cached_operations = 0
+        self.redirects_observed = 0
+        self.search_requests = 0
+        self.citation_requests = 0
+        self.bib_verification_requests = 0
+        self.budget_exhausted = False
+        self._cache: dict[str, Any] = {}
+
+    def get_json(
+        self,
+        url: str,
+        *,
+        timeout: float = 15.0,
+        category: str = "search",
+        max_retries: int = 0,
+        opener: Any = None,
+    ) -> Any:
+        if url in self._cache:
+            self.cached_operations += 1
+            return self._cache[url]
+
+        open_fn = opener or urllib.request.urlopen
+        last_exc: Exception | None = None
+        for attempt_idx in range(max_retries + 1):
+            if self.max_http_requests is not None and self.http_attempts >= self.max_http_requests:
+                self.budget_exhausted = True
+                raise HttpBudgetExhaustedError(
+                    f"HTTP request budget exhausted ({self.http_attempts}/{self.max_http_requests}) before {category} request."
+                )
+            if attempt_idx > 0:
+                self.retries += 1
+            self.http_attempts += 1
+            if category == "search":
+                self.search_requests += 1
+            elif category == "citation":
+                self.citation_requests += 1
+            elif category == "bib_verification":
+                self.bib_verification_requests += 1
+
+            req = urllib.request.Request(
+                url,
+                headers={"User-Agent": "TAKO-SOTA-Mini-MVP/0.1 (mailto:research-local@example.org)"},
+            )
+            try:
+                with open_fn(req, timeout=timeout) as resp:
+                    if hasattr(resp, "geturl") and resp.geturl() and resp.geturl() != url:
+                        self.redirects_observed += 1
+                    if resp.status != 200:
+                        self.http_failures += 1
+                        last_exc = RetrievalError(f"OpenAlex HTTP {resp.status} for {url}")
+                        continue
+                    payload = json.loads(resp.read().decode("utf-8"))
+                    self.http_successes += 1
+                    self._cache[url] = payload
+                    return payload
+            except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
+                self.http_failures += 1
+                last_exc = exc
+        raise RetrievalError(f"Live OpenAlex retrieval failed for {url!r}: {last_exc}") from last_exc
+
+    def summary(self) -> dict[str, Any]:
+        return {
+            "max_http_requests": self.max_http_requests,
+            "http_attempts": self.http_attempts,
+            "http_successes": self.http_successes,
+            "http_failures": self.http_failures,
+            "retries": self.retries,
+            "cached_operations": self.cached_operations,
+            "redirects_observed": self.redirects_observed,
+            "search_requests": self.search_requests,
+            "citation_requests": self.citation_requests,
+            "bib_verification_requests": self.bib_verification_requests,
+            "budget_exhausted": self.budget_exhausted,
+        }
+
+
+def fetch_openalex(
+    query: str,
+    per_page: int = 10,
+    timeout: float = 15.0,
+    *,
+    tracker: HttpRequestTracker | None = None,
+    max_retries: int = 0,
+) -> list[dict[str, Any]]:
     params = urllib.parse.urlencode({"search": query, "per-page": str(per_page)})
     url = f"{OPENALEX_WORKS_URL}?{params}"
+    if tracker is not None:
+        payload = tracker.get_json(url, timeout=timeout, category="search", max_retries=max_retries)
+        return list(payload.get("results") or [])
     req = urllib.request.Request(
         url,
         headers={"User-Agent": "TAKO-SOTA-Mini-MVP/0.1 (mailto:research-local@example.org)"},
@@ -74,7 +173,13 @@ def fetch_openalex(query: str, per_page: int = 10, timeout: float = 15.0) -> lis
     return list(payload.get("results") or [])
 
 
-def fetch_openalex_citations(work: dict[str, Any], max_per_direction: int = 5, timeout: float = 10.0) -> dict[str, list[dict[str, Any]]]:
+def fetch_openalex_citations(
+    work: dict[str, Any],
+    max_per_direction: int = 5,
+    timeout: float = 10.0,
+    *,
+    tracker: HttpRequestTracker | None = None,
+) -> dict[str, list[dict[str, Any]]]:
     """Fetch bounded backward (referenced_works) and forward (cited_by_api_url) OpenAlex works."""
     backward: list[dict[str, Any]] = []
     forward: list[dict[str, Any]] = []
@@ -83,30 +188,50 @@ def fetch_openalex_citations(work: dict[str, Any], max_per_direction: int = 5, t
     if ref_ids:
         short_ids = "|".join(r.rsplit("/", 1)[-1] for r in ref_ids)
         params = urllib.parse.urlencode({"filter": f"openalex:{short_ids}", "per-page": str(max_per_direction)})
-        req = urllib.request.Request(
-            f"{OPENALEX_WORKS_URL}?{params}",
-            headers={"User-Agent": "TAKO-SOTA-Mini-MVP/0.1 (mailto:research-local@example.org)"},
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                if resp.status == 200:
-                    backward = list((json.loads(resp.read().decode("utf-8"))).get("results") or [])
-        except Exception:
-            pass
+        b_url = f"{OPENALEX_WORKS_URL}?{params}"
+        if tracker is not None:
+            try:
+                payload = tracker.get_json(b_url, timeout=timeout, category="citation")
+                backward = list(payload.get("results") or [])
+            except HttpBudgetExhaustedError:
+                raise
+            except Exception:
+                pass
+        else:
+            req = urllib.request.Request(
+                b_url,
+                headers={"User-Agent": "TAKO-SOTA-Mini-MVP/0.1 (mailto:research-local@example.org)"},
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    if resp.status == 200:
+                        backward = list((json.loads(resp.read().decode("utf-8"))).get("results") or [])
+            except Exception:
+                pass
 
     cited_by_url = str(work.get("cited_by_api_url") or "").strip()
     if cited_by_url.startswith("https://api.openalex.org/"):
         sep = "&" if "?" in cited_by_url else "?"
-        req = urllib.request.Request(
-            f"{cited_by_url}{sep}per-page={max_per_direction}",
-            headers={"User-Agent": "TAKO-SOTA-Mini-MVP/0.1 (mailto:research-local@example.org)"},
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                if resp.status == 200:
-                    forward = list((json.loads(resp.read().decode("utf-8"))).get("results") or [])
-        except Exception:
-            pass
+        f_url = f"{cited_by_url}{sep}per-page={max_per_direction}"
+        if tracker is not None:
+            try:
+                payload = tracker.get_json(f_url, timeout=timeout, category="citation")
+                forward = list(payload.get("results") or [])
+            except HttpBudgetExhaustedError:
+                raise
+            except Exception:
+                pass
+        else:
+            req = urllib.request.Request(
+                f_url,
+                headers={"User-Agent": "TAKO-SOTA-Mini-MVP/0.1 (mailto:research-local@example.org)"},
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    if resp.status == 200:
+                        forward = list((json.loads(resp.read().decode("utf-8"))).get("results") or [])
+            except Exception:
+                pass
 
     return {"backward": backward, "forward": forward}
 

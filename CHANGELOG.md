@@ -5,6 +5,15 @@ All notable changes to the public TAKO repository are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [PEP 440](https://peps.python.org/pep-0440/) / [SemVer](https://semver.org/) for releases.
 
+## [Unreleased] — `0.0.1.dev8` Candidate (P4: Runtime, Security & Provider Qualification)
+
+### Added
+- Observable HTTP transport telemetry (`HttpRequestTracker`, `HttpBudgetExhaustedError` in `tools/sota_discovery/sota.py` and `tools/sota_discovery/engine.py`) separating `logical_operations` from `observable_http_telemetry` (`http_attempts`, `http_successes`, `http_failures`, `retries`, `cached_operations`, `redirects_observed`, `budget_exhausted`).
+- Subprocess trust hardening (`_sanitized_provider_env`, `stdin=subprocess.DEVNULL`, `MAX_PROVIDER_OUTPUT_BYTES` cap, `http_attempts="NOT_OBSERVABLE"`) in `tools/sota_ai_native/workflow.py`.
+- Trust-origin and content-hash verification checks on imported `completeness_verification_evidence` and `assessment_evidence` in `tools/sota_evidence.py`.
+- Expanded CI Python qualification matrix (`3.9`, `3.12`, `3.13`) in `.github/workflows/hygiene.yml`.
+- Runtime, security, and provider qualification regression suite (`tests/sota_ai_native/test_runtime_security_qualification.py`, `Q01`–`Q20`).
+
 ## [Unreleased] — `0.0.1.dev7` Candidate (P4: CLI Product Experience)
 
 ### Added

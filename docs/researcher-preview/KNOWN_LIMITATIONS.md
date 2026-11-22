@@ -1,4 +1,4 @@
-# Known Limitations (`0.0.1.dev7` Candidate)
+# Known Limitations (`0.0.1.dev8` Candidate)
 
 1. **Windows Runtime Not Tested:** Built as `py3-none-any` and verified on `Linux x86_64` (Python `3.14.10`). No Windows host was available (`WINDOWS_RUNTIME_STATUS=NOT_TESTED`; WSL does not substitute for native Windows).
 2. **PDF Parsing Unavailable:** `tako evidence --source` rejects `.pdf` files in zero-dependency mode. Supply plain text (`.txt`), Markdown (`.md`), JATS XML (`.xml`), BibTeX (`.bib`), RIS (`.ris`), or JSON (`.json`).

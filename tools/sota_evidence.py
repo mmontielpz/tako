@@ -173,19 +173,31 @@ def acquire_evidence(paper: dict[str, Any]) -> dict[str, Any]:
             observed_structure = "PAGINATED"
         else:
             observed_structure = "UNSTRUCTURED_TEXT"
+        content_hash = _sha256_text(content)
         cve = paper.get("completeness_verification_evidence")
+        non_auth_origins = {"RESEARCHER_DECLARATION", "IMPORTED_THIRD_PARTY_ASSERTION", "PROVIDER_ASSERTION"}
+        cve_origin = str(cve.get("trust_origin") or "LOCALLY_EXECUTED_VERIFICATION").strip() if isinstance(cve, dict) else ""
+        cve_hash_ok = True
+        if isinstance(cve, dict) and cve.get("source_content_hash") is not None:
+            cve_hash_ok = str(cve.get("source_content_hash")) == content_hash
+        cve_id_ok = True
+        if isinstance(cve, dict) and cve.get("paper_id") is not None:
+            cve_id_ok = str(cve.get("paper_id")) == paper_id
         has_valid_cve = (
             isinstance(cve, dict)
             and str(cve.get("status") or "").strip().upper() == "VERIFIED"
             and bool(str(cve.get("method") or "").strip())
             and bool(str(cve.get("verifier") or "").strip())
             and bool(str(cve.get("evidence_ref") or "").strip())
+            and cve_origin not in non_auth_origins
+            and cve_hash_ok
+            and cve_id_ok
         )
         if paper.get("completeness_verified") is True and has_valid_cve and observed_structure != "UNSTRUCTURED_TEXT":
             doc_completeness = "VERIFIED_COMPLETE_PUBLICATION"
         elif researcher_declared_completeness == "FULL_PUBLICATION" or paper.get("completeness_verified") is True:
             doc_completeness = "DECLARED_COMPLETE_UNVERIFIED"
-            limitations.append("Completeness declared without independent verification evidence; not promoted to VERIFIED_COMPLETE_PUBLICATION.")
+            limitations.append("Completeness declared without authoritative verification evidence; not promoted to VERIFIED_COMPLETE_PUBLICATION.")
         else:
             doc_completeness = "PARTIAL_EXCERPT"
             limitations.append("Supplied full_text is a partial excerpt; complete publication retrieval not verified.")
@@ -494,9 +506,22 @@ def normalize_extraction(paper: dict[str, Any], ev_rec: dict[str, Any]) -> dict[
     return out
 
 
-def _has_valid_assessment_evidence(raw_c: dict[str, Any]) -> bool:
+def _has_valid_assessment_evidence(
+    raw_c: dict[str, Any],
+    *,
+    expected_paper_id: str | None = None,
+    expected_content_hash: str | None = None,
+) -> bool:
     ae = raw_c.get("assessment_evidence")
     if not isinstance(ae, dict):
+        return False
+    non_auth_origins = {"RESEARCHER_DECLARATION", "IMPORTED_THIRD_PARTY_ASSERTION", "PROVIDER_ASSERTION"}
+    origin = str(ae.get("trust_origin") or "LOCALLY_EXECUTED_VERIFICATION").strip()
+    if origin in non_auth_origins:
+        return False
+    if expected_paper_id and ae.get("paper_id") is not None and str(ae.get("paper_id")) != expected_paper_id:
+        return False
+    if expected_content_hash and ae.get("source_content_hash") is not None and str(ae.get("source_content_hash")) != expected_content_hash:
         return False
     return (
         str(ae.get("status") or "").strip().upper() == "VERIFIED"
@@ -531,7 +556,11 @@ def register_claims(
             score = corr_det["similarity"]
 
             requested_support = str(raw_c.get("claim_support_status") or CLAIM_NOT_CHECKED)
-            has_assess = _has_valid_assessment_evidence(raw_c)
+            has_assess = _has_valid_assessment_evidence(
+                raw_c,
+                expected_paper_id=pid,
+                expected_content_hash=target_ev.get("content_hash"),
+            )
 
             support = requested_support
             if ev["availability_status"] in (EVIDENCE_MODEL_RECALL, EVIDENCE_METADATA_ONLY, EVIDENCE_UNAVAILABLE, EVIDENCE_UNKNOWN):

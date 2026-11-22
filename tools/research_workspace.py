@@ -22,7 +22,7 @@ from tools.sota_integrity import BIB_STATUS_VERIFIED, EVIDENCE_ABSTRACT_BASED, E
 
 WORKSPACE_SCHEMA = "tako-workspace/v1"
 WORKSPACE_FILENAME = "tako_workspace.json"
-TAKO_VERSION = "0.0.1.dev7"
+TAKO_VERSION = "0.0.1.dev8"
 
 SUPPORTED_LOCAL_FORMATS = {".txt", ".md", ".json", ".bib", ".ris", ".xml", ".jats"}
 

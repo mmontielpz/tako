@@ -277,6 +277,18 @@ def extract_copilot_jsonl_response(stdout: str) -> tuple[str, dict[str, Any]]:
     return stdout, usage
 
 
+MAX_PROVIDER_OUTPUT_BYTES = 2 * 1024 * 1024
+
+
+def _sanitized_provider_env(allow_key_env: str | None = None) -> dict[str, str]:
+    """Build a minimal environment for CLI subprocesses without leaking unrelated credentials."""
+    keep = ("PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TERM", "TMPDIR", "SYSTEMROOT", "COMSPEC")
+    env = {k: os.environ[k] for k in keep if k in os.environ}
+    if allow_key_env and allow_key_env in os.environ:
+        env[allow_key_env] = os.environ[allow_key_env]
+    return env
+
+
 def call_claude_cli(prompt: str, allow_paid_api: bool = False, timeout: float = 90.0) -> tuple[str, dict[str, Any]]:
     if not allow_paid_api:
         raise ProviderBlockedError(
@@ -288,6 +300,8 @@ def call_claude_cli(prompt: str, allow_paid_api: bool = False, timeout: float = 
     try:
         proc = subprocess.run(
             [exe, "-p", prompt, "--output-format", "json"],
+            stdin=subprocess.DEVNULL,
+            env=_sanitized_provider_env("ANTHROPIC_API_KEY"),
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -296,6 +310,8 @@ def call_claude_cli(prompt: str, allow_paid_api: bool = False, timeout: float = 
         )
     except subprocess.TimeoutExpired as exc:
         raise ProviderBlockedError(f"claude CLI timed out after {timeout}s.") from exc
+    if len(proc.stdout.encode("utf-8", errors="replace")) > MAX_PROVIDER_OUTPUT_BYTES:
+        raise ProviderBlockedError("claude CLI stdout exceeded MAX_PROVIDER_OUTPUT_BYTES limit.")
     if proc.returncode != 0:
         raise ProviderBlockedError(f"claude CLI failed (exit {proc.returncode}): {proc.stderr.strip()}")
     try:
@@ -309,12 +325,13 @@ def call_claude_cli(prompt: str, allow_paid_api: bool = False, timeout: float = 
             request_count=1,
             input_tokens=u_raw.get("input_tokens", "UNKNOWN"),
             output_tokens=u_raw.get("output_tokens", "UNKNOWN"),
+            provider_specific_usage={"http_attempts": "NOT_OBSERVABLE", "cached_tokens": u_raw.get("cache_read_input_tokens", "UNKNOWN")},
             measurement_availability="provider_reported" if (u_raw or isinstance(cost, (int, float))) else "UNKNOWN",
             provenance="claude-cli-json",
         )
     except json.JSONDecodeError:
         text = proc.stdout
-        usage = make_usage_record(request_count=1, provenance="claude-cli-raw")
+        usage = make_usage_record(request_count=1, provider_specific_usage={"http_attempts": "NOT_OBSERVABLE"}, provenance="claude-cli-raw")
     return text, usage
 
 
@@ -337,6 +354,8 @@ def call_copilot_cli(prompt: str, allow_paid_api: bool = False, timeout: float =
                 "--no-custom-instructions",
                 "--disable-builtin-mcps",
             ],
+            stdin=subprocess.DEVNULL,
+            env=_sanitized_provider_env("GH_TOKEN"),
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -345,6 +364,8 @@ def call_copilot_cli(prompt: str, allow_paid_api: bool = False, timeout: float =
         )
     except subprocess.TimeoutExpired as exc:
         raise ProviderBlockedError(f"copilot CLI timed out after {timeout}s.") from exc
+    if len(proc.stdout.encode("utf-8", errors="replace")) > MAX_PROVIDER_OUTPUT_BYTES:
+        raise ProviderBlockedError("copilot CLI stdout exceeded MAX_PROVIDER_OUTPUT_BYTES limit.")
     if proc.returncode != 0:
         err_preview = proc.stderr.strip()[:200] or proc.stdout.strip()[:200]
         raise ProviderBlockedError(f"copilot CLI failed (exit {proc.returncode}): {err_preview}")
