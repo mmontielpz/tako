@@ -3,7 +3,7 @@
 Status: Foundation tokens preserved from `TAKO-001B` / `TAKO-004`, extended with low-fidelity Desktop workbench wireframes for `P7` (`M029E`).
 
 ## Direction
-Calm, technical, researcher-friendly. Dark theme first, light theme second. Purple (`#B07CFF` / `#5B2FB8`) is the brand accent; pixel-art companion assets are used sparingly; text-heavy reading surfaces stay clean and conventional. Interaction inspiration: GitHub Copilot and Antigravity IDE/ADE (original assets only).
+Calm, technical, researcher-friendly. Dark theme first, light theme second. Purple (`#B07CFF` / `#5B2FB8`) is the brand accent; pixel-art Research Mate assets are used sparingly; text-heavy reading surfaces stay clean and conventional. Interaction inspiration: GitHub Copilot and Antigravity IDE/ADE (original assets only).
 
 ## Color Tokens
 | Token | Dark | Light | Notes |
@@ -27,7 +27,7 @@ Calm, technical, researcher-friendly. Dark theme first, light theme second. Purp
 +-----------------------------------------------------------------------------------+
 | TAKO ARDE  [Workspace: jetseg-evolution v]  [Task: Create SOTA v]   [Free | AGY]  |
 +-------------------+-----------------------------------+---------------------------+
-| WORKSPACE         | [SOTA Studio] [Paper: BiSeNet]    | RESEARCH COMPANION (AGY)  |
+| WORKSPACE         | [SOTA Studio] [Paper: BiSeNet]    | RESEARCH MATE (AGY)       |
 | - Library (15)    |-----------------------------------|---------------------------|
 | - SOTA Matrix     | Round 2/3 [=====>   ] 12/24 HTTP  | Context: BiSeNet (2018)   |
 | - Claims & Gaps   | [x] BiSeNet (VERIFIED, ABSTRACT)  |                           |

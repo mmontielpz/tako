@@ -2,7 +2,7 @@
 
 - **Product:** TAKO
 - **Category:** Agentic Research Development Environment (`ARDE`)
-- **Positioning:** *Your Research Environment, AI Companion & Scientific Ecosystem.*
+- **Positioning:** *Your Research Environment, Research Mate & Scientific Ecosystem.*
 - **Tagline:** *From research questions to reproducible scientific knowledge.*
 - **Current Public Release:** `v0.1.0a2` (Experimental CLI; Desktop GUI planned in `P7`).
 
@@ -14,7 +14,7 @@ TAKO evolves from a bounded scientific CLI toolkit into an integrated, local-fir
 
 ## 2. Six Product Pillars
 1. **Research Environment:** Integrated workspace uniting literature, notes, comparisons, writing, and experiments.
-2. **AI Research Companion:** Context-aware, human-in-the-loop assistant grounded in verified workspace evidence.
+2. **Research Mate:** Persistent, contextual, evidence-grounded intelligence layer operating across TAKO research workspaces, papers, comparisons, workflows, notes, and future experimentation capabilities.
 3. **Scientific Knowledge:** Structured bibliographic verification, claims, comparabilities, and research gaps.
 4. **Research Workflows:** Task-oriented scientific flows (SOTA, paper understanding, comparison, hypothesis, experiments) rather than raw technical commands.
 5. **Research Ecosystem:** Open, local-first interoperability with BibTeX/LaTeX, RIS, Zotero, Mendeley, Overleaf, Jupyter, Git/GitHub, discovery APIs, and AI CLIs.

@@ -8,7 +8,7 @@
 
 # TAKO
 
-**Your Research Environment, AI Companion & Scientific Ecosystem.**  
+**Your Research Environment, Research Mate & Scientific Ecosystem.**  
 *From research questions to reproducible scientific knowledge.*
 
 TAKO is evolving from a bounded scientific CLI toolkit into an open-source, local-first **Agentic Research Development Environment (ARDE)** built for researchers, scientists, professors, and graduate students who want evidence-grounded discovery and synthesis without sacrificing scientific integrity or local ownership.

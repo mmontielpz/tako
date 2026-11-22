@@ -26,12 +26,12 @@ flowchart TB
 - **No Direct LLM API Key Required:** Standard workflows use existing authenticated local CLI sessions (`subscription_cli` mode), never silently invoking nested agents or falling back to paid APIs.
 - **Explicit Metered API Separation:** Direct metered LLM APIs (e.g., `OPENAI_API_KEY`) remain strictly gated behind `--allow-paid-api`.
 
-## 3. Research Companion Interaction
+## 3. Research Mate Interaction
 ```mermaid
 sequenceDiagram
   actor R as Researcher
   participant UI as TAKO Workspace / CLI
-  participant C as Research Companion (CLI-First AI)
+  participant C as Research Mate (CLI-First AI)
   participant K as Verified Workspace Knowledge
 
   R->>UI: Ask question / select passage / start SOTA

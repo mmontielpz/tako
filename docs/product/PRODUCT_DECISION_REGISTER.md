@@ -9,4 +9,5 @@
 | **PD-005** | `Create a State of the Art` is the first end-to-end workflow | Validates discovery -> verification -> comparison -> synthesis before broader studios | **Approved** |
 | **PD-006** | Open local formats (`BibTeX`, `RIS`, `LaTeX`, `MD`, `CSV`, `JSON`, `.ipynb`) before cloud sync | Avoids premature vendor lock-in and sync complexity | **Approved** |
 | **PD-007** | Preserve all Tier 1 evidence gates (`INSUFFICIENT_EVIDENCE`, verified vs candidate split) | Prevents citation fabrication and overclaimed sufficiency | **Approved** |
-| **PD-008** | Retain `ResearchOS` concepts conceptually only; local ResearchOS artifacts unavailable | Zero fabrication; do not adopt external stack blindly | **Recorded** |
+| **PD-008** | Retain `ResearchOS` concepts conceptually only; `RESEARCHOS_SOURCES=UNAVAILABLE` locally (M029E dependency to recover & inspect before ARDE UX/requirements completion; does not block M029A–M029D) | Zero fabrication; do not adopt external stack blindly | **Recorded** |
+| **PD-009** | **Research Mate** is the official product name for TAKO's contextual scientific intelligence layer | Distinguishes TAKO's persistent, workspace-aware, evidence-grounded intelligence layer from generic chatbots | **Approved** |
