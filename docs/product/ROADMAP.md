@@ -101,23 +101,35 @@ Cloud/data integrations, multi-agent orchestration, team features, marketplace, 
 
 ---
 
-## Owner Scope Update (`M025C` — CachyOS-First Owner Pilot for JetSeg)
+## Owner Scope & Strategy Update (`M027` — `LINUX_FIRST` & CachyOS Owner Pilot for JetSeg)
 
 Supersedes conflicting pilot, platform, or release preparation notes above:
 
+- **`PRODUCT_STRATEGY`:** `LINUX_FIRST`
+- **`PRIMARY_PLATFORM`:** `CACHYOS`
+- **`SECONDARY_PLATFORM`:** `UBUNTU_DESKTOP_24_04_LTS`
 - **`PRIMARY_PILOT_RESEARCHER`:** `OWNER`
-- **`PRIMARY_PILOT_PLATFORM`:** `CACHYOS`
 - **`PRIMARY_PILOT_PROJECT`:** `JETSEG_EVOLUTION` (Real-Time Semantic Segmentation, Efficient Deep Learning, Edge AI, TinyML, Physical AI, Resource-Constrained Computer Vision)
-- **`PRIMARY_INTERFACE`:** `CLI`
+- **`PRIMARY_PILOT_INTERFACE`:** `CLI`
+- **`DESKTOP_DEVELOPMENT`:** `PLANNED_POST_PILOT` (Desktop is no longer globally frozen; implementation remains out of M027 scope)
+- **`GUI_UI_UX_DEVELOPMENT`:** `PLANNED_POST_PILOT`
 - **Frozen / Deferred Workstreams:**
-  - `SECONDARY_RESEARCHER_PILOT=FROZEN`
-  - `BROTHER_PILOT=FROZEN`
-  - `WINDOWS_NEW_DEVELOPMENT=FROZEN` (preserve existing Windows CI checks and historical evidence; no new Windows installer/UX work)
-  - `UBUNTU_NEW_DEVELOPMENT=FROZEN` (preserve existing Ubuntu CI checks and historical evidence; no new Ubuntu installer/UX work)
-  - `DESKTOP_DEVELOPMENT=FROZEN`
-  - `GUI_UI_UX_DEVELOPMENT=FROZEN`
+  - `BROTHER_RESEARCHER_PILOT=FROZEN`
+  - `WINDOWS_NEW_DEVELOPMENT=FROZEN` (preserve existing Windows CI checks and historical evidence)
+  - `MACOS_NEW_DEVELOPMENT=FROZEN`
   - `FORMAL_BENCHMARK_PROGRAM=DEFERRED`
-  - `AI_SDLC_LITE_MODIFICATIONS=FORBIDDEN` (`AI_SDLC_LITE_EXPERIENCE_CAPTURE=ACTIVE`, `AI_SDLC_LITE_EVOLUTION=DEFERRED` until after P5 JetSeg pilot evidence)
-- **Next Mission (`M026` — `TAKO-EXPERIMENTAL-CLI-RELEASE-AND-CACHYOS-RESEARCHER-STARTER-KIT-026`):**
-  - CachyOS-first experimental CLI release with minimal local Linux installer (isolated Python venv; no `sudo`, `pacman`, or global `pip`), verified wheel & SHA-256 checksums, Setup Wizard, Doctor, AGY & GitHub Copilot starter prompts, standalone CLI workflow, native CachyOS installation qualification, JetSeg research workspace initialization, and lightweight researcher feedback mechanism.
+  - `AI_SDLC_LITE_MODIFICATIONS=FORBIDDEN` (`AI_SDLC_LITE_EXPERIENCE_CAPTURE=ACTIVE`, `AI_SDLC_LITE_EVOLUTION=DEFERRED`)
+
+### Canonical Phases (`M027` Reconciled)
+
+- **`P0–P3`:** Scientific and Engineering Foundations — Completed.
+- **`P4`:** Experimental CLI Release — Final publication gate (`v0.1.0a1`).
+- **`P5`:** JetSeg Researcher Pilot — CachyOS CLI.
+- **`P6`:** Researcher Experience and Optimization.
+- **`P7.0`:** Shared scientific core and Desktop architecture.
+- **`P7.1`:** Native CachyOS Desktop.
+- **`P7.2`:** Native Ubuntu Desktop 24.04 LTS.
+- **`P7.3`:** GUI, UI/UX and Researcher Experience.
+- **`P7.4`:** Linux Desktop packaging and distribution (Windows and macOS expansion frozen pending owner authorization).
+- **`P8`:** Research Ecosystem — Deferred.
 

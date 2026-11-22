@@ -110,7 +110,7 @@ See [Agent Starter Prompts](docs/AGENT_STARTER_PROMPTS.md) for copy-paste prompt
 ## Architecture & Roadmap
 
 - **Architecture Diagrams:** See [ARDE Architecture Diagrams](docs/architecture/ARDE_ARCHITECTURE_DIAGRAMS.md) (Workflow, Multi-Source Discovery, Evidence & Integrity, Assistant Integration, CLI/Desktop Boundary, Roadmap) and [Branding & Provenance](docs/assets/BRANDING_AND_PROVENANCE.md).
-- **Roadmap:** `P4` CLI Readiness (`M024B–E` complete -> `M025` OSS Presentation -> `M026` Experimental CLI Release & Starter Kit) → `P5` Brother Researcher Pilot → `P6` Feedback & RX → `P7` TAKO Desktop (`Windows` then `Ubuntu`) → `P8` Research Ecosystem. See [Roadmap](docs/product/ROADMAP.md) and [Current State](CURRENT_STATE.md).
+- **Roadmap:** `P4` Experimental CLI Release (`v0.1.0a1`) → `P5` JetSeg Researcher Pilot (`CachyOS` CLI) → `P6` Researcher Experience and Optimization → `P7.0–P7.4` TAKO Desktop (`LINUX_FIRST`: CachyOS then Ubuntu 24.04 LTS) → `P8` Research Ecosystem (Deferred). See [Roadmap](docs/product/ROADMAP.md) and [Current State](CURRENT_STATE.md).
 
 ---
 
