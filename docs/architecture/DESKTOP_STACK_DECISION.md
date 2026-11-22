@@ -58,4 +58,4 @@ Editor/terminal components, auto-update, packaging/signing, Windows support time
 
 ## Outcome (TAKO-004B)
 
-Tauri 2 shell qualified on Linux: compiled, launched, native folder picker and the engine bridge working, strict CSP, a single granted plugin permission (`dialog:allow-open`). Observed cost of the webview model: WebKitGTK needed `WEBKIT_DISABLE_DMABUF_RENDERER=1` on the test machine (blank window otherwise). macOS and Windows rendering remain unverified, so the re-evaluation triggers above still apply. See [the report](../missions/TAKO-004B/REPORT.md).
+Tauri 2 shell qualified on Linux: compiled, launched, native folder picker and the engine bridge working, strict CSP, a single granted plugin permission (`dialog:allow-open`). Observed cost of the webview model: WebKitGTK needed `WEBKIT_DISABLE_DMABUF_RENDERER=1` on the test machine (blank window otherwise). macOS and Windows rendering remain unverified, so the re-evaluation triggers above still apply. See `docs/missions/TAKO-004B/REPORT.md` (internal archive, excluded from public repo).

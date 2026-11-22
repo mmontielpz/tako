@@ -22,7 +22,11 @@ __pycache__/
 .venv/
 dist/
 build/
+*.egg-info/
 target/
+experiments/
+sota_output/
+sota_*_output/
 
 # Local agent state
 .claude/settings.local.json

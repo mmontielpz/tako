@@ -1,0 +1,388 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tako:backend-evidence:v1",
+  "title": "TAKO read-only backend evidence v1",
+  "description": "Wire shape only. Normative semantic and authority rules are in CONTRACT.md; schema validation alone never proves an outcome.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "identity",
+    "revision",
+    "observed_at_ms",
+    "expires_at_ms",
+    "availability",
+    "reason",
+    "lifecycle",
+    "execution",
+    "artifacts",
+    "verification",
+    "isolation",
+    "acceptance"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "tako.backend-evidence.v1"
+    },
+    "identity": {
+      "$ref": "#/$defs/identity"
+    },
+    "revision": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "\\S"
+    },
+    "observed_at_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 18446744073709551615
+    },
+    "expires_at_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 18446744073709551615
+    },
+    "availability": {
+      "type": "string",
+      "enum": [
+        "available",
+        "incomplete",
+        "unavailable",
+        "not_found"
+      ]
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "\\S"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "lifecycle": {
+      "type": "string",
+      "enum": [
+        "unknown",
+        "queued",
+        "running",
+        "completed",
+        "failed",
+        "cancelled"
+      ]
+    },
+    "execution": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/execution"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "artifacts": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": {
+        "$ref": "#/$defs/artifact"
+      }
+    },
+    "verification": {
+      "$ref": "#/$defs/verification"
+    },
+    "isolation": {
+      "$ref": "#/$defs/isolation"
+    },
+    "acceptance": {
+      "const": "not_supported"
+    }
+  },
+  "$defs": {
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "backend_id",
+        "project_id",
+        "mission_id"
+      ],
+      "properties": {
+        "backend_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "\\S"
+        },
+        "project_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "\\S"
+        },
+        "mission_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "\\S"
+        }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "execution_id",
+        "attempt",
+        "runner_id",
+        "status",
+        "started_at_ms",
+        "finished_at_ms",
+        "exit_code",
+        "subject_sha256",
+        "provenance_id"
+      ],
+      "properties": {
+        "execution_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "\\S"
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "runner_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "\\S"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "running",
+            "succeeded",
+            "failed",
+            "cancelled"
+          ]
+        },
+        "started_at_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "finished_at_ms": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "exit_code": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": -2147483648,
+              "maximum": 2147483647
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "subject_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "provenance_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "\\S"
+        }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_id",
+        "mission_id",
+        "execution_id",
+        "kind",
+        "sha256",
+        "issuer_id"
+      ],
+      "properties": {
+        "artifact_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "\\S"
+        },
+        "mission_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "\\S"
+        },
+        "execution_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "\\S"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "execution",
+            "verification",
+            "isolation"
+          ]
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "issuer_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "\\S"
+        }
+      }
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "check_id",
+        "status"
+      ],
+      "properties": {
+        "check_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "\\S"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "passed",
+            "failed",
+            "skipped"
+          ]
+        }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "evidence_id",
+        "expected_checks",
+        "checks",
+        "subject_sha256"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "unverified",
+            "pending",
+            "failed",
+            "passed"
+          ]
+        },
+        "evidence_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "\\S"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expected_checks": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "pattern": "\\S"
+          },
+          "uniqueItems": true
+        },
+        "checks": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "$ref": "#/$defs/check"
+          }
+        },
+        "subject_sha256": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "isolation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "claimed_level",
+        "evidence_id"
+      ],
+      "properties": {
+        "claimed_level": {
+          "type": "string",
+          "enum": [
+            "unknown",
+            "l0_worktree",
+            "l1_bubblewrap"
+          ]
+        },
+        "evidence_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "\\S"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

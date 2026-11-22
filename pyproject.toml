@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tako-researcher-preview"
+version = "0.0.1.dev3"
+description = "TAKO Experimental Researcher Preview CLI for State-of-the-Art (SOTA) literature discovery"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.scripts]
+tako = "tools.cli:main"
+
+[tool.setuptools]
+packages = ["tools", "tools.sota_discovery", "tools.sota_ai_native"]
+
+[tool.setuptools.package-data]
+"tools.sota_ai_native" = ["example_fixture.json"]
