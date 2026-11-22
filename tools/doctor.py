@@ -36,59 +36,73 @@ def build_doctor_report() -> dict[str, object]:
             "name": "openalex (tako sota)",
             "installed": "YES",
             "configured": "YES (no key required)",
+            "authenticated": "NOT_REQUIRED",
             "available": "YES",
             "native_search": "YES (OpenAlex Works API)",
-            "live_tested": "PASS (Linux)",
+            "live_tested": "PREVIOUSLY_QUALIFIED (Linux)",
         },
         {
             "name": "copilot-cli (tako sota-ai)",
             "installed": _bool_label(bool(exes["copilot"])),
             "configured": "SESSION_DEPENDENT (run `copilot login`)",
+            "authenticated": "UNVERIFIED (never inferred from executable)",
             "available": _bool_label(bool(exes["copilot"])),
             "native_search": "NOT_VERIFIED (no documented general web search; pair with --verify-bib)",
-            "live_tested": "NOT_TESTED",
+            "live_tested": "CURRENTLY_UNVERIFIED",
         },
         {
             "name": "claude-cli (tako sota-ai)",
             "installed": _bool_label(bool(exes["claude"])),
             "configured": "SESSION_DEPENDENT (authenticated `claude` session)",
+            "authenticated": "UNVERIFIED (never inferred from executable)",
             "available": _bool_label(bool(exes["claude"])),
             "native_search": "BUILT_IN_CLI_WEBSEARCH (requires authenticated session)",
-            "live_tested": "NOT_TESTED",
+            "live_tested": "CURRENTLY_UNVERIFIED",
         },
         {
             "name": "openai-responses (tako sota-ai)",
             "installed": "YES (stdlib HTTP)",
             "configured": _bool_label(creds["OPENAI_API_KEY"]),
+            "authenticated": "KEY_PRESENT_UNVERIFIED" if creds["OPENAI_API_KEY"] else "NO",
             "available": _bool_label(creds["OPENAI_API_KEY"]),
             "native_search": "YES (web_search_preview)",
-            "live_tested": "NOT_TESTED",
+            "live_tested": "CURRENTLY_UNVERIFIED",
         },
         {
-            "name": "fixture (tako sota-ai)",
+            "name": "fixture (tako sota / sota-ai)",
             "installed": "YES",
             "configured": "YES",
-            "available": "YES (offline test mode only)",
+            "authenticated": "NOT_REQUIRED",
+            "available": "YES (offline fixture mode only)",
             "native_search": "NO (offline fixture)",
-            "live_tested": "PASS (offline unit tests)",
+            "live_tested": "OFFLINE_QUALIFIED (unit tests)",
         },
         {
             "name": "codex-cli",
             "installed": _bool_label(bool(exes["codex"])),
             "configured": "NOT_IMPLEMENTED",
+            "authenticated": "UNSUPPORTED",
             "available": "NO (not integrated in tako sota-ai)",
             "native_search": "NOT_IMPLEMENTED",
-            "live_tested": "NOT_TESTED",
+            "live_tested": "UNSUPPORTED",
         },
         {
             "name": "gemini-cli",
             "installed": _bool_label(bool(exes["gemini"])),
             "configured": "NOT_IMPLEMENTED",
+            "authenticated": "UNSUPPORTED",
             "available": "NO (not integrated in tako sota-ai)",
             "native_search": "NOT_IMPLEMENTED",
-            "live_tested": "NOT_TESTED",
+            "live_tested": "UNSUPPORTED",
         },
     ]
+
+    local_capabilities = {
+        "evidence_txt_md_json_bib_ris_jats": "SUPPORTED (local offline ingestion)",
+        "evidence_pdf": "UNSUPPORTED (zero-dependency mode; supply .txt/.md/.xml or JSON)",
+        "semantic_extraction": "UNAVAILABLE (normalizes supplied fields only)",
+        "windows_native": "NOT_TESTED (WSL/Linux tested only; native Windows in M024)",
+    }
 
     missing: list[str] = []
     if not creds["OPENAI_API_KEY"]:
@@ -104,6 +118,7 @@ def build_doctor_report() -> dict[str, object]:
         "executables": {k: bool(v) for k, v in exes.items()},
         "credentials_present": creds,
         "providers": providers,
+        "local_capabilities": local_capabilities,
         "missing_requirements": missing,
     }
 
@@ -119,8 +134,11 @@ def run_doctor() -> int:
     for p in report["providers"]:
         print(
             f"  - {p['name']}: INSTALLED={p['installed']} | CONFIGURED={p['configured']} | "
-            f"AVAILABLE={p['available']} | SEARCH={p['native_search']} | LIVE_TESTED={p['live_tested']}"
+            f"AUTHENTICATED={p['authenticated']} | AVAILABLE={p['available']} | SEARCH={p['native_search']} | LIVE_TESTED={p['live_tested']}"
         )
+    print("\nLocal Evidence & Platform Capabilities:")
+    for k, v in report["local_capabilities"].items():
+        print(f"  - {k}: {v}")
     if report["missing_requirements"]:
         print("\nMissing / Optional Requirements:")
         for item in report["missing_requirements"]:

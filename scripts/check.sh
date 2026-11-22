@@ -9,7 +9,7 @@ err() { echo "FAIL: $*"; fail=1; }
 for f in README.md AGENTS.md CLAUDE.md CONTRIBUTING.md CODE_OF_CONDUCT.md SECURITY.md CHANGELOG.md \
          CURRENT_STATE.md .gitignore .github/PULL_REQUEST_TEMPLATE.md pyproject.toml \
          docs/contracts/backend-evidence/v1/conformance-example.json \
-         tools/cli.py tools/doctor.py tools/sota_integrity.py tools/sota_evidence.py tools/sota_discovery/sota.py tools/sota_discovery/engine.py tools/sota_ai_native/workflow.py \
+         tools/cli.py tools/doctor.py tools/research_workspace.py tools/sota_integrity.py tools/sota_evidence.py tools/sota_discovery/sota.py tools/sota_discovery/engine.py tools/sota_ai_native/workflow.py \
          docs/product/PRODUCT_VISION.md docs/product/MVP_SCOPE.md \
          docs/architecture/ARCHITECTURE_PRINCIPLES.md docs/architecture/OPEN_SOURCE_BOUNDARY.md \
          docs/decisions/0001-license.md LICENSE NOTICE \

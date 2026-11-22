@@ -89,10 +89,19 @@ TAKO is fully open source. A small number of related projects remain private; th
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Report security issues as described in [SECURITY.md](SECURITY.md). All participation is governed by the [Code of Conduct](CODE_OF_CONDUCT.md).
 
-## Experimental Researcher Preview (`0.0.1.dev3`)
+## Experimental Researcher Preview CLI (`0.0.1.dev7` Candidate on `develop`; Published `0.0.1.dev3`)
 
-Download the wheel from [Release v0.0.1.dev3](https://github.com/mmontielpz/tako/releases/tag/v0.0.1.dev3) or install directly from `experiment/researcher-preview` without shell activation:
+Download the published wheel from [Release v0.0.1.dev3](https://github.com/mmontielpz/tako/releases/tag/v0.0.1.dev3) or install from source in an isolated virtualenv without shell activation:
 - **Linux (Bash or Fish):** `python3 -m venv .tako-venv && ./.tako-venv/bin/pip install --no-deps . && ./.tako-venv/bin/tako doctor`
 - **Windows (PowerShell):** `py -m venv .tako-venv ; .\.tako-venv\Scripts\python.exe -m pip install --no-deps . ; .\.tako-venv\Scripts\tako.exe doctor`
 
-See [Windows Quickstart](docs/researcher-preview/WINDOWS_QUICKSTART.md), [Provider Compatibility](docs/researcher-preview/PROVIDER_COMPATIBILITY.md), [Known Limitations](docs/researcher-preview/KNOWN_LIMITATIONS.md), and [Researcher Feedback](docs/researcher-preview/RESEARCHER_FEEDBACK.md). Report issues via [GitHub Issues](https://github.com/mmontielpz/tako/issues) (do not post credentials or confidential research).
+### First Offline Research Workflow (`develop` CLI)
+```sh
+tako init --topic "Graph Neural Networks" --objective "Survey benchmark methods" --workspace ./my-study
+tako sota --topic "Graph Neural Networks" --objective "Survey benchmark methods" --iterative --fixture fx.json --out-dir ./my-study/runs/discovery
+tako evidence --workspace ./my-study --from-workflow-dir ./my-study/runs/discovery --source ./notes.md
+tako status --workspace ./my-study
+tako export --workspace ./my-study --out-dir ./my-study/exports --format all
+```
+
+Supported local `--source` formats: `.txt`, `.md`, `.json`, `.bib`, `.ris`, `.xml`/`.jats` (`.pdf` is rejected with an actionable error in zero-dependency mode). See [Windows Quickstart](docs/researcher-preview/WINDOWS_QUICKSTART.md), [Provider Compatibility](docs/researcher-preview/PROVIDER_COMPATIBILITY.md), [Known Limitations](docs/researcher-preview/KNOWN_LIMITATIONS.md), and [Researcher Feedback](docs/researcher-preview/RESEARCHER_FEEDBACK.md). Report issues via [GitHub Issues](https://github.com/mmontielpz/tako/issues) (do not post credentials or confidential research).
