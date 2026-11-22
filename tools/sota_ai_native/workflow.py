@@ -16,12 +16,23 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from tools.sota_discovery.sota import fetch_openalex, make_bib_key
+from tools.sota_discovery.sota import fetch_openalex
+from tools.sota_integrity import (
+    aggregate_usage_records,
+    classify_evidence_provenance,
+    deduplicate_cue_sentences,
+    deduplicate_text_items,
+    make_usage_record,
+    partition_bibliography,
+    render_bibtex_entries,
+    verify_paper_identity,
+)
 
 MATRIX_FIELDS = [
     "Title", "Authors", "Year", "Publication venue", "DOI or source URL",
     "Relevance rationale", "Seminal work candidate", "Research contribution",
     "Reported results", "Limitations", "Evidence level",
+    "Bibliographic status", "Evidence availability", "Claim support status", "Human review status",
 ]
 
 
@@ -70,11 +81,15 @@ def call_openai_responses_web_search(
             if content.get("type") == "output_text" and content.get("text"):
                 text_chunks.append(content["text"])
     usage = payload.get("usage") or {}
-    return "\n".join(text_chunks), {
-        "input_tokens": usage.get("input_tokens", "UNKNOWN"),
-        "output_tokens": usage.get("output_tokens", "UNKNOWN"),
-        "cost_usd": "UNKNOWN",
-    }
+    return "\n".join(text_chunks), make_usage_record(
+        cost_usd="UNKNOWN",
+        premium_requests="UNKNOWN",
+        request_count=1,
+        input_tokens=usage.get("input_tokens", "UNKNOWN"),
+        output_tokens=usage.get("output_tokens", "UNKNOWN"),
+        measurement_availability="provider_reported" if usage else "UNKNOWN",
+        provenance="openai-responses",
+    )
 
 
 def parse_provider_json(raw: str, provider: str) -> dict[str, Any]:
@@ -129,6 +144,11 @@ VALID_EVIDENCE_LEVELS = {
 def normalize_evidence_level(raw_level: Any, provider: str) -> str:
     label = str(raw_level or "").strip()
     low = label.lower()
+    if provider == "copilot-cli":
+        # Copilot CLI recall outputs lack retrieved abstract/full-text provenance in TAKO.
+        if low in ("", "model-recall", "model_recall"):
+            return "MODEL_RECALL"
+        return f"MODEL_RECALL (clamped_from={label!r})"
     if low in VALID_EVIDENCE_LEVELS:
         if low == "not_verified":
             return "NOT_VERIFIED"
@@ -136,10 +156,11 @@ def normalize_evidence_level(raw_level: Any, provider: str) -> str:
             return "UNKNOWN"
         if low in ("model-recall", "model_recall"):
             return "MODEL_RECALL"
+        if low in ("abstract-based", "full-text") and provider != "fixture":
+            # Without verified retrieved text correspondence, do not promote recall to abstract/full-text.
+            return f"MODEL_RECALL (unbacked_claim={label!r})"
         return low
-    if provider == "copilot-cli":
-        return f"MODEL_RECALL (unsupported_label={label!r})" if label else "MODEL_RECALL"
-    return f"NOT_VERIFIED (unsupported_label={label!r})" if label else "NOT_VERIFIED"
+    return f"UNKNOWN (unsupported_label={label!r})" if label else "UNKNOWN"
 
 
 def normalize_authors(raw_authors: Any) -> str:
@@ -179,7 +200,11 @@ def validate_role_payload(role_name: str, payload: dict[str, Any], provider: str
 
 def extract_copilot_jsonl_response(stdout: str) -> tuple[str, dict[str, Any]]:
     """Extract assistant text and usage metadata from Copilot CLI --output-format json (JSONL)."""
-    usage: dict[str, Any] = {"input_tokens": "UNKNOWN", "output_tokens": "UNKNOWN", "cost_usd": "UNKNOWN"}
+    input_tokens: int | str = "UNKNOWN"
+    output_tokens: int | str = "UNKNOWN"
+    premium_requests: int | str = "UNKNOWN"
+    cost_usd: float | str = "UNKNOWN"
+    provider_specific: dict[str, Any] = {}
     messages: list[str] = []
     final_answers: list[str] = []
     event_types: list[str] = []
@@ -214,16 +239,27 @@ def extract_copilot_jsonl_response(stdout: str) -> tuple[str, dict[str, Any]]:
 
         if isinstance(obj.get("usage"), dict):
             u = obj["usage"]
-            usage["input_tokens"] = u.get("input_tokens", u.get("inputTokens", usage["input_tokens"]))
-            usage["output_tokens"] = u.get("output_tokens", u.get("outputTokens", usage["output_tokens"]))
-            if "premiumRequests" in u and usage["cost_usd"] == "UNKNOWN":
-                usage["cost_usd"] = f"premium_requests:{u['premiumRequests']}"
-        if "total_cost_usd" in obj:
-            usage["cost_usd"] = obj["total_cost_usd"]
-        elif isinstance(data, dict) and "ai_credits" in data:
-            usage["cost_usd"] = f"credits:{data['ai_credits']}"
-        elif isinstance(data, dict) and "totalPremiumRequests" in data and usage["cost_usd"] == "UNKNOWN":
-            usage["cost_usd"] = f"premium_requests:{data['totalPremiumRequests']}"
+            input_tokens = u.get("input_tokens", u.get("inputTokens", input_tokens))
+            output_tokens = u.get("output_tokens", u.get("outputTokens", output_tokens))
+            if "premiumRequests" in u:
+                premium_requests = u["premiumRequests"]
+        if "total_cost_usd" in obj and isinstance(obj["total_cost_usd"], (int, float)):
+            cost_usd = obj["total_cost_usd"]
+        if isinstance(data, dict) and "ai_credits" in data:
+            provider_specific["ai_credits"] = data["ai_credits"]
+        if isinstance(data, dict) and "totalPremiumRequests" in data and premium_requests == "UNKNOWN":
+            premium_requests = data["totalPremiumRequests"]
+
+    usage = make_usage_record(
+        cost_usd=cost_usd,
+        premium_requests=premium_requests,
+        request_count=1,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        provider_specific_usage=provider_specific,
+        measurement_availability="provider_reported" if (premium_requests != "UNKNOWN" or input_tokens != "UNKNOWN") else "UNKNOWN",
+        provenance="copilot-cli-jsonl",
+    )
 
     candidates = final_answers if final_answers else messages
     if candidates:
@@ -265,14 +301,20 @@ def call_claude_cli(prompt: str, allow_paid_api: bool = False, timeout: float = 
     try:
         data = json.loads(proc.stdout)
         text = data.get("result") or proc.stdout
-        usage = {
-            "input_tokens": (data.get("usage") or {}).get("input_tokens", "UNKNOWN"),
-            "output_tokens": (data.get("usage") or {}).get("output_tokens", "UNKNOWN"),
-            "cost_usd": data.get("total_cost_usd", "UNKNOWN"),
-        }
+        u_raw = data.get("usage") or {}
+        cost = data.get("total_cost_usd", "UNKNOWN")
+        usage = make_usage_record(
+            cost_usd=cost if isinstance(cost, (int, float)) else "UNKNOWN",
+            premium_requests="UNKNOWN",
+            request_count=1,
+            input_tokens=u_raw.get("input_tokens", "UNKNOWN"),
+            output_tokens=u_raw.get("output_tokens", "UNKNOWN"),
+            measurement_availability="provider_reported" if (u_raw or isinstance(cost, (int, float))) else "UNKNOWN",
+            provenance="claude-cli-json",
+        )
     except json.JSONDecodeError:
         text = proc.stdout
-        usage = {"input_tokens": "UNKNOWN", "output_tokens": "UNKNOWN", "cost_usd": "UNKNOWN"}
+        usage = make_usage_record(request_count=1, provenance="claude-cli-raw")
     return text, usage
 
 
@@ -325,7 +367,15 @@ def run_role(
     if provider == "fixture":
         assert fixture_data is not None
         role_payload = fixture_data.get(role_name.lower()) or {}
-        return role_payload, {"input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}
+        return role_payload, make_usage_record(
+            cost_usd=0.0,
+            premium_requests=0,
+            request_count=0,
+            input_tokens=0,
+            output_tokens=0,
+            measurement_availability="fixture_zero",
+            provenance="offline_fixture",
+        )
     if provider == "openai-responses":
         raw, usage = call_openai_responses_web_search(prompt, model=model, allow_paid_api=allow_paid_api)
         return validate_role_payload(role_name, parse_provider_json(raw, provider), provider), usage
@@ -338,55 +388,31 @@ def run_role(
     raise ProviderBlockedError(f"Unsupported provider: {provider}")
 
 
+def _fetch_openalex_by_doi(normalized_doi: str) -> dict[str, Any] | None:
+    doi_url = "https://api.openalex.org/works/" + normalized_doi.strip()
+    req = urllib.request.Request(doi_url, headers={"User-Agent": "TAKO-SOTA-Mini-MVP/0.1"})
+    try:
+        with urllib.request.urlopen(req, timeout=10.0) as resp:
+            if resp.status == 200:
+                return json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return None
+    return None
+
+
 def verify_bibliographic_records(papers: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Optional deterministic OpenAlex verification preserving original returned metadata."""
+    seen_identities: set[str] = set()
     checks: list[dict[str, Any]] = []
     for p in papers:
-        title = str(p.get("Title") or "")
-        year = p.get("Year")
-        url = str(p.get("DOI or source URL") or "")
-        try:
-            best = None
-            if "doi.org/" in url.lower():
-                doi_url = "https://api.openalex.org/works/" + url.strip()
-                req = urllib.request.Request(doi_url, headers={"User-Agent": "TAKO-SOTA-Mini-MVP/0.1"})
-                try:
-                    with urllib.request.urlopen(req, timeout=10.0) as resp:
-                        if resp.status == 200:
-                            best = json.loads(resp.read().decode("utf-8"))
-                except Exception:
-                    best = None
-            if best is None:
-                hits = fetch_openalex(title, per_page=3, timeout=10.0)
-                for h in hits:
-                    htitle = (h.get("display_name") or "").lower()
-                    if title.lower()[:25] in htitle or htitle[:25] in title.lower():
-                        best = h
-                        break
-                if best is None and hits:
-                    best = hits[0]
-
-            if best:
-                oa_title = (best.get("display_name") or "").strip()
-                oa_year = best.get("publication_year")
-                oa_doi = (best.get("doi") or "").strip()
-                title_match = title.lower()[:25] in oa_title.lower() or oa_title.lower()[:25] in title.lower()
-                year_match = str(year) == str(oa_year)
-                doi_match = (not url or url in ("UNKNOWN", "NOT_VERIFIED")) or (url.lower().rstrip("/") == oa_doi.lower().rstrip("/"))
-                status = "VERIFIED" if (title_match and year_match and doi_match) else "MISMATCH"
-                checks.append({
-                    "Title": title,
-                    "returned_year": year,
-                    "url": url,
-                    "oa_title": oa_title,
-                    "oa_year": oa_year,
-                    "oa_doi": oa_doi,
-                    "openalex_match": status,
-                })
-            else:
-                checks.append({"Title": title, "returned_year": year, "url": url, "openalex_match": "UNVERIFIABLE"})
-        except Exception as exc:
-            checks.append({"Title": title, "returned_year": year, "url": url, "openalex_match": f"UNAVAILABLE ({exc})"})
+        checks.append(
+            verify_paper_identity(
+                p,
+                fetch_by_doi_fn=_fetch_openalex_by_doi,
+                search_fn=lambda q: fetch_openalex(q, per_page=3, timeout=10.0),
+                seen_identities=seen_identities,
+            )
+        )
     return checks
 
 
@@ -419,8 +445,34 @@ def write_ai_native_outputs(
 ) -> list[pathlib.Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     is_fixture = provider == "fixture"
-    papers = list(analyst_out.get("papers") or researcher_out.get("papers") or [])
-    related_topics = list(researcher_out.get("related_topics") or [])
+    raw_papers = list(analyst_out.get("papers") or researcher_out.get("papers") or [])
+    related_topics = deduplicate_text_items(list(researcher_out.get("related_topics") or []))
+
+    papers: list[dict[str, Any]] = []
+    for idx, p in enumerate(raw_papers):
+        item = dict(p)
+        contrib, res, lim = deduplicate_cue_sentences(
+            str(item.get("Research contribution") or "NOT_VERIFIED"),
+            str(item.get("Reported results") or "NOT_VERIFIED"),
+            str(item.get("Limitations") or "NOT_VERIFIED"),
+        )
+        item["Research contribution"] = contrib
+        item["Reported results"] = res
+        item["Limitations"] = lim
+        chk = bib_checks[idx] if (bib_checks is not None and idx < len(bib_checks)) else None
+        prov = classify_evidence_provenance(
+            item,
+            provider=provider,
+            bib_check=chk,
+            has_retrieved_abstract=False,
+            has_full_text=False,
+        )
+        item["Evidence level"] = prov["EVIDENCE_AVAILABILITY"]
+        item["Bibliographic status"] = prov["BIBLIOGRAPHIC_STATUS"]
+        item["Evidence availability"] = prov["EVIDENCE_AVAILABILITY"]
+        item["Claim support status"] = prov["CLAIM_SUPPORT_STATUS"]
+        item["Human review status"] = prov["HUMAN_REVIEW_STATUS"]
+        papers.append(item)
 
     matrix_path = out_dir / "literature_matrix.csv"
     with matrix_path.open("w", newline="", encoding="utf-8") as f:
@@ -431,33 +483,18 @@ def write_ai_native_outputs(
             writer.writerow(row)
 
     bib_path = out_dir / "references.bib"
+    candidates_bib_path = out_dir / "references_candidates.bib"
     used_keys: set[str] = set()
-    bib_entries: list[str] = []
-    for p in papers:
-        authors = str(p.get("Authors") or "UNKNOWN")
-        first_author = authors.split(";")[0].split()[-1] if authors != "UNKNOWN" else "unknown"
-        rec_stub = {"_first_author": first_author, "Year": p.get("Year", "UNKNOWN"), "Title": p.get("Title", "paper")}
-        key = make_bib_key(rec_stub, used_keys)
-        url = str(p.get("DOI or source URL") or "UNKNOWN")
-        doi_line = f"  doi = {{{url.replace('https://doi.org/', '')}}},\n" if "doi.org/" in url else ""
-        venue = str(p.get("Publication venue") or "UNKNOWN")
-        venue_line = f"  journal = {{{venue}}},\n" if venue != "UNKNOWN" else "  note = {Publication venue UNKNOWN},\n"
-        bib_entries.append(
-            f"@article{{{key},\n"
-            f"  title = {{{p.get('Title', 'UNKNOWN')}}},\n"
-            f"  author = {{{authors}}},\n"
-            f"  year = {{{p.get('Year', 'UNKNOWN')}}},\n"
-            f"{venue_line}{doi_line}"
-            f"  url = {{{url}}}\n"
-            f"}}"
-        )
-    bib_path.write_text("\n\n".join(bib_entries) + ("\n" if bib_entries else ""), encoding="utf-8")
+    accepted, candidates, excluded, accounting = partition_bibliography(papers, bib_checks)
+    bib_path.write_text(render_bibtex_entries(accepted, is_candidate=False, used_keys=used_keys), encoding="utf-8")
+    candidates_bib_path.write_text(render_bibtex_entries(candidates, is_candidate=True, used_keys=used_keys), encoding="utf-8")
 
     chronological = sorted(papers, key=lambda r: (int(r["Year"]) if isinstance(r.get("Year"), int) else 9999, str(r.get("Title", ""))))
     source_mode = "FIXTURE MODE (NOT LIVE AI-NATIVE RESEARCH)" if is_fixture else f"Live Provider-Native ({provider})"
     raw_notes = analyst_out.get("comparative_notes")
     if isinstance(raw_notes, list):
-        comp_notes = "\n".join(f"- {item}" for item in raw_notes if str(item).strip()) or "No comparable experimental benchmarks verified across papers."
+        dedup_notes = deduplicate_text_items([str(item).strip() for item in raw_notes if str(item).strip()])
+        comp_notes = "\n".join(f"- {item}" for item in dedup_notes) or "No comparable experimental benchmarks verified across papers."
     else:
         comp_notes = str(raw_notes or "").strip() or "No comparable experimental benchmarks verified across papers."
 
@@ -467,21 +504,29 @@ def write_ai_native_outputs(
         "",
         f"- **Source Mode:** {source_mode}",
         f"- **Research Objective:** {objective}",
-        f"- **Papers Analyzed:** {len(papers)}",
+        f"- **Papers Analyzed:** {len(papers)} (bibliography: accepted={accounting['accepted']}, candidates={accounting['candidates']}, excluded={accounting['excluded']})",
         f"- **Elapsed Seconds:** {elapsed_seconds:.2f}",
-        f"- **Token Usage:** input={usage_totals['input_tokens']}, output={usage_totals['output_tokens']}, cost_usd={usage_totals['cost_usd']}",
+        f"- **Token Usage:** input={usage_totals.get('input_tokens', 'UNKNOWN')}, output={usage_totals.get('output_tokens', 'UNKNOWN')}, total={usage_totals.get('total_tokens', 'UNKNOWN')}, requests={usage_totals.get('request_count', 'UNKNOWN')}, premium_requests={usage_totals.get('premium_requests', 'UNKNOWN')}, cost_usd={usage_totals.get('cost_usd', 'UNKNOWN')} (availability={usage_totals.get('measurement_availability', 'UNKNOWN')})",
         "",
+    ]
+    if accounting["accepted"] == 0:
+        lines.extend([
+            "> **Empty Accepted Bibliography Notice:** `references.bib` is EMPTY (0 bibliographically verified entries). Unverified or mismatched records are routed to `references_candidates.bib`. Process exit `0` indicates pipeline completion only, not scientific quality `PASS`.",
+            "",
+        ])
+    lines.extend([
         "## 1. Related Research Topics (Researcher)",
         ", ".join(str(t) for t in related_topics) if related_topics else "UNKNOWN",
         "",
         "## 2. Chronological Evolution & Comparative Analysis (Analyst)",
         comp_notes,
         "",
-    ]
+    ])
     for p in chronological:
         lines.extend([
             f"### {p.get('Year', 'UNKNOWN')} — {p.get('Title', 'UNKNOWN')}",
-            f"- **Authors:** {p.get('Authors', 'UNKNOWN')} | **Venue:** {p.get('Publication venue', 'UNKNOWN')} | **Evidence:** `{p.get('Evidence level', 'NOT_VERIFIED')}`",
+            f"- **Authors:** {p.get('Authors', 'UNKNOWN')} | **Venue:** {p.get('Publication venue', 'UNKNOWN')}",
+            f"- **Status:** Bibliographic=`{p.get('Bibliographic status', 'NOT_CHECKED')}` | Evidence=`{p.get('Evidence availability', 'UNKNOWN')}` | Claim support=`{p.get('Claim support status', 'NOT_CHECKED')}` | Human review=`{p.get('Human review status', 'PENDING')}`",
             f"- **Source:** {p.get('DOI or source URL', 'UNKNOWN')}",
             f"- **Contribution:** {p.get('Research contribution', 'NOT_VERIFIED')}",
             f"- **Reported results:** {p.get('Reported results', 'NOT_VERIFIED')}",
@@ -505,20 +550,20 @@ def write_ai_native_outputs(
             "",
             "## Challenged / Unsupported Claims",
         ]
-        for item in reviewer_out.get("challenged_claims") or ["None flagged."]:
+        for item in deduplicate_text_items(reviewer_out.get("challenged_claims") or ["None flagged."]):
             review_lines.append(f"- {_stringify_item(item)}")
         review_lines.extend(["", "## Missing Foundational Works"])
-        for item in reviewer_out.get("missing_foundational") or ["None flagged."]:
+        for item in deduplicate_text_items(reviewer_out.get("missing_foundational") or ["None flagged."]):
             review_lines.append(f"- {_stringify_item(item)}")
         review_lines.extend(["", "## Actionable Corrections & Uncertainty Labels"])
-        for item in reviewer_out.get("corrections") or ["None."]:
+        for item in deduplicate_text_items(reviewer_out.get("corrections") or ["None."]):
             review_lines.append(f"- {_stringify_item(item)}")
         if bib_checks is not None:
             review_lines.extend(["", "## Optional Deterministic Bibliographic Verification (OpenAlex)"])
             for chk in bib_checks:
                 review_lines.append(f"- **{chk['Title']}** ({chk['url']}): `{chk['openalex_match']}`")
     review_path.write_text("\n".join(review_lines) + "\n", encoding="utf-8")
-    return [report_path, matrix_path, bib_path, review_path]
+    return [report_path, matrix_path, bib_path, candidates_bib_path, review_path]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -574,7 +619,7 @@ def main(argv: list[str] | None = None) -> int:
         _save_stage_json(out_dir, "stage_03_analyst.json", {"elapsed_seconds": round(time.monotonic() - ts_a0, 3), "usage": u2, "payload": analyst_out})
 
         reviewer_out = None
-        u3 = {"input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}
+        u3 = None
         if args.with_reviewer:
             ts_v0 = time.monotonic()
             reviewer_prompt = (
@@ -588,30 +633,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"PROVIDER_BLOCKED: {exc}", file=sys.stderr)
         return 1
 
-    def sum_field(key: str) -> Any:
-        vals = [u.get(key) for u in (u1, u2, u3)]
-        if all(isinstance(v, (int, float)) for v in vals):
-            return sum(vals)
-        if key == "cost_usd":
-            prem = []
-            for v in vals:
-                if isinstance(v, str) and v.startswith("premium_requests:"):
-                    try:
-                        prem.append(int(v.split(":", 1)[1]))
-                    except ValueError:
-                        pass
-                elif v == 0 or v == 0.0:
-                    prem.append(0)
-            if prem and len(prem) == len(vals):
-                return f"premium_requests:{sum(prem)}"
-        return "UNKNOWN"
-
-    usage_totals = {
-        "input_tokens": sum_field("input_tokens"),
-        "output_tokens": sum_field("output_tokens"),
-        "cost_usd": sum_field("cost_usd"),
-    }
     elapsed = time.monotonic() - t0
+    usage_records = [u1, u2] + ([u3] if u3 is not None else [])
+    usage_totals = aggregate_usage_records(usage_records, wall_time_seconds=elapsed)
     outputs = write_ai_native_outputs(
         out_dir=pathlib.Path(args.out_dir),
         topic=args.topic,

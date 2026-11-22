@@ -5,7 +5,21 @@ All notable changes to the public TAKO repository are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [PEP 440](https://peps.python.org/pep-0440/) / [SemVer](https://semver.org/) for releases.
 
-## [Unreleased]
+## [Unreleased] — `0.0.1.dev4` Candidate (Increment A: Scientific Integrity)
+
+### Added
+- Shared scientific integrity module (`tools/sota_integrity.py`) and regression tests (`tests/sota_ai_native/test_scientific_integrity.py`).
+- Bibliographic segregation (`M017-F06`): `references.bib` contains only bibliographically verified identities; unresolved or mismatched records are routed to `references_candidates.bib` with discrepancy evidence and without emitting mismatched DOIs.
+- Orthogonal provenance columns in `literature_matrix.csv` (`Bibliographic status`, `Evidence availability`, `Claim support status`, `Human review status`), keeping bibliographic identity separate from scientific claim support (`F03`, `F06`).
+
+### Fixed
+- `F01`: Independent bibliographic identity verification separating reported identifier, normalized identifier, retrieved authoritative metadata, verification outcome, discrepancy evidence, and corrected identity.
+- `F02`: Deterministic sentence-level deduplication across `Reported results` and `Limitations` and list items without dropping distinct findings.
+- `F03` / `F06`: System-enforced `EVIDENCE_AVAILABILITY` (`MODEL_RECALL` for `copilot-cli` recall outputs, `ABSTRACT_BASED` / `METADATA_ONLY` for OpenAlex), ignoring unsupported LLM self-attestations.
+- `F04`: BibTeX ` and ` author separator in `references.bib` and `references_candidates.bib` without splitting on commas.
+- `F05`: Separated `cost_usd` (`"UNKNOWN"` when monetary cost is unavailable; `0.0` only for local `fixture`), `premium_requests`, `request_count`, `input_tokens`, `output_tokens`, `total_tokens`, `provider_specific_usage`, and `wall_time_seconds` (breaking telemetry fix: `premium_requests` no longer populates `cost_usd`).
+
+## [Unreleased] — Engineering Foundation (`P0`, Integrated into `develop`)
 
 ### Added
 - `CHANGELOG.md` documenting verified `v0.0.1.dev3` capabilities, limitations, and canonical `P0`–`P8` roadmap.

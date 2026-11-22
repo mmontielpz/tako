@@ -64,7 +64,8 @@ class CopilotReplayTests(unittest.TestCase):
         ])
         text, usage = extract_copilot_jsonl_response(stream)
         self.assertEqual(parse_provider_json(text, "copilot-cli"), {"status": "ok", "value": 42})
-        self.assertEqual(usage["cost_usd"], "premium_requests:1")
+        self.assertEqual(usage["cost_usd"], "UNKNOWN")
+        self.assertEqual(usage["premium_requests"], 1)
 
     def test_author_list_and_unsupported_evidence_label_normalization(self):
         payload = {

@@ -96,7 +96,7 @@ def discover_works(
 
     dedup: dict[str, dict[str, Any]] = {}
     for w in raw_works:
-        key = (w.get("doi") or w.get("id") or w.get("title") or "").strip().lower()
+        key = (w.get("doi") or w.get("id") or w.get("display_name") or w.get("title") or "").strip().lower()
         if key and key not in dedup:
             dedup[key] = w
 
@@ -149,10 +149,13 @@ def discover_works(
         )
 
         if abstract:
+            from tools.sota_integrity import deduplicate_cue_sentences
+
             sents = split_sentences(abstract)
             contribution = extract_by_cues(sents, CONTRIB_CUES, "NOT_VERIFIED (not explicitly stated in abstract)")
             results = extract_by_cues(sents, RESULT_CUES, "NOT_VERIFIED (no quantitative/empirical result in abstract)")
             limitations = extract_by_cues(sents, LIMIT_CUES, "NOT_VERIFIED (limitations not stated in abstract)")
+            contribution, results, limitations = deduplicate_cue_sentences(contribution, results, limitations)
         else:
             contribution = "UNKNOWN (metadata-only; no abstract accessible)"
             results = "UNKNOWN (metadata-only; no abstract accessible)"
@@ -164,6 +167,21 @@ def discover_works(
         if overlap:
             rationale_parts.append(f"objective/topic terms ({len(overlap)}): {', '.join(overlap[:5])}")
         rationale = "; ".join(rationale_parts) if rationale_parts else "Retrieved via scholarly search; weak lexical overlap"
+
+        from tools.sota_integrity import (
+            BIB_STATUS_UNVERIFIABLE,
+            BIB_STATUS_VERIFIED,
+            classify_evidence_provenance,
+        )
+
+        bib_ok = bool(title and title != "UNKNOWN" and year is not None and (w.get("doi") or w.get("id")))
+        bib_stub = {"identity_verification_outcome": BIB_STATUS_VERIFIED if bib_ok else BIB_STATUS_UNVERIFIABLE}
+        prov = classify_evidence_provenance(
+            {"Evidence level": evidence_level},
+            provider="openalex",
+            bib_check=bib_stub,
+            has_retrieved_abstract=bool(abstract),
+        )
 
         records.append({
             "Title": title,
@@ -177,6 +195,10 @@ def discover_works(
             "Reported results": results,
             "Limitations": limitations,
             "Evidence level": evidence_level,
+            "Bibliographic status": prov["BIBLIOGRAPHIC_STATUS"],
+            "Evidence availability": prov["EVIDENCE_AVAILABILITY"],
+            "Claim support status": prov["CLAIM_SUPPORT_STATUS"],
+            "Human review status": prov["HUMAN_REVIEW_STATUS"],
             "_score": score,
             "_cited_by": cited_by,
             "_first_author": (authors_list[0].split()[-1] if authors_list else "unknown"),
@@ -211,15 +233,19 @@ def write_outputs(
     related_topics: list[str],
     is_fixture: bool,
 ) -> list[pathlib.Path]:
+    from tools.sota_integrity import BIB_STATUS_VERIFIED, render_bibtex_entries
+
     out_dir.mkdir(parents=True, exist_ok=True)
     matrix_path = out_dir / "literature_matrix.csv"
     bib_path = out_dir / "references.bib"
+    candidates_bib_path = out_dir / "references_candidates.bib"
     report_path = out_dir / "sota_report.md"
 
     fields = [
         "Title", "Authors", "Year", "Publication venue", "DOI or source URL",
         "Relevance rationale", "Seminal work candidate", "Research contribution",
         "Reported results", "Limitations", "Evidence level",
+        "Bibliographic status", "Evidence availability", "Claim support status", "Human review status",
     ]
     with matrix_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fields)
@@ -228,24 +254,18 @@ def write_outputs(
             writer.writerow({k: r[k] for k in fields})
 
     used_keys: set[str] = set()
-    bib_entries: list[str] = []
-    for r in records:
-        key = make_bib_key(r, used_keys)
-        url = r["DOI or source URL"]
-        doi_line = f"  doi = {{{url.replace('https://doi.org/', '')}}},\n" if "doi.org/" in url else ""
-        venue = r["Publication venue"]
-        venue_line = f"  journal = {{{venue}}},\n" if venue != "UNKNOWN" else "  note = {Publication venue UNKNOWN},\n"
-        bib_entries.append(
-            f"@article{{{key},\n"
-            f"  title = {{{r['Title']}}},\n"
-            f"  author = {{{r['Authors']}}},\n"
-            f"  year = {{{r['Year']}}},\n"
-            f"{venue_line}"
-            f"{doi_line}"
-            f"  url = {{{url}}}\n"
-            f"}}"
-        )
-    bib_path.write_text("\n\n".join(bib_entries) + ("\n" if bib_entries else ""), encoding="utf-8")
+    accepted_items = [
+        {"paper": r, "bib_check": None, "outcome": r.get("Bibliographic status", BIB_STATUS_VERIFIED)}
+        for r in records
+        if r.get("Bibliographic status") == BIB_STATUS_VERIFIED
+    ]
+    candidate_items = [
+        {"paper": r, "bib_check": None, "outcome": r.get("Bibliographic status", "UNVERIFIABLE")}
+        for r in records
+        if r.get("Bibliographic status") != BIB_STATUS_VERIFIED
+    ]
+    bib_path.write_text(render_bibtex_entries(accepted_items, is_candidate=False, used_keys=used_keys), encoding="utf-8")
+    candidates_bib_path.write_text(render_bibtex_entries(candidate_items, is_candidate=True, used_keys=used_keys), encoding="utf-8")
 
     chronological = sorted(records, key=lambda r: (int(r["Year"]) if isinstance(r["Year"], int) else 9999, r["Title"]))
     seminal = [r for r in records if str(r["Seminal work candidate"]).startswith("YES")]
@@ -257,14 +277,21 @@ def write_outputs(
         f"- **Source Mode:** {source_mode}",
         f"- **Research Objective:** {objective}",
         f"- **Discovery Seeds:** {', '.join(seeds) if seeds else 'None'}",
-        f"- **Papers Selected:** {len(records)}",
+        f"- **Papers Selected:** {len(records)} (bibliography: accepted={len(accepted_items)}, candidates={len(candidate_items)}, excluded=0)",
         "- **Evidence Disclaimer:** Extractions are strictly `abstract-based` or `metadata-only` (no full-text PDF parsing). Missing fields are marked `UNKNOWN` or `NOT_VERIFIED`. Citation counts and venues are not treated as proof of scientific superiority.",
         "",
+    ]
+    if len(accepted_items) == 0:
+        lines.extend([
+            "> **Empty Accepted Bibliography Notice:** `references.bib` is EMPTY (0 bibliographically verified entries). Unverified records are routed to `references_candidates.bib`. Process exit `0` indicates pipeline completion only, not scientific quality `PASS`.",
+            "",
+        ])
+    lines.extend([
         "## 1. Related Research Topics Discovered",
         ", ".join(related_topics) if related_topics else "UNKNOWN",
         "",
         "## 2. Candidate Seminal & Foundational Works",
-    ]
+    ])
     if seminal:
         for r in seminal:
             lines.append(f"- **{r['Year']} — {r['Title']}** ({r['Authors']}) — {r['DOI or source URL']} (`{r['Evidence level']}`)")
@@ -275,7 +302,7 @@ def write_outputs(
     for r in chronological:
         lines.extend([
             f"### {r['Year']} — {r['Title']}",
-            f"- **Authors:** {r['Authors']} | **Venue:** {r['Publication venue']} | **Evidence:** `{r['Evidence level']}`",
+            f"- **Authors:** {r['Authors']} | **Venue:** {r['Publication venue']} | **Status:** Bibliographic=`{r.get('Bibliographic status', 'NOT_CHECKED')}` | Evidence=`{r.get('Evidence availability', r['Evidence level'])}` | Claim support=`{r.get('Claim support status', 'NOT_CHECKED')}`",
             f"- **Source:** {r['DOI or source URL']}",
             f"- **Contribution:** {r['Research contribution']}",
             f"- **Reported results:** {r['Reported results']}",
@@ -290,7 +317,7 @@ def write_outputs(
         "- Seminal-work flags are heuristic candidates only, not peer-reviewed endorsements.",
     ])
     report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return [report_path, matrix_path, bib_path]
+    return [report_path, matrix_path, bib_path, candidates_bib_path]
 
 
 def main(argv: list[str] | None = None) -> int:
