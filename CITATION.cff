@@ -1,0 +1,8 @@
+cff-version: 1.2.0
+message: "If you use TAKO in your research workflow, please cite this repository."
+title: "TAKO: Agentic Research Development Environment (ARDE)"
+version: "0.0.1.dev10"
+license: Apache-2.0
+repository-code: "https://github.com/mmontielpz/tako"
+authors:
+  - name: "Miguel Lopez"
