@@ -5,8 +5,15 @@
 - **CI-Tested Matrix:** Ubuntu Linux (Python `3.9`, `3.12`, `3.13`, `3.14`) and Windows (Python `3.12`). Native macOS is `NOT_TESTED`.
 - **Dependencies:** Zero external Python dependencies required (`--no-deps` wheel install inside an isolated virtual environment to avoid system Python / PEP 668 conflicts).
 
-## 2. Install TAKO in a Virtual Environment
+## 2. Install TAKO
 
+### Native Linux Bootstrap (Recommended once `v0.1.0a2` is published)
+See [Linux Distribution Guide](LINUX_DISTRIBUTION.md) for the download-inspect-execute alternative, `tako update`, `tako uninstall`, and integrity model:
+```bash
+curl -fsSL https://raw.githubusercontent.com/mmontielpz/tako/main/install.sh | bash
+```
+
+### Offline / Manual Virtual Environment Fallback
 ### Windows (PowerShell)
 ```powershell
 python -m venv .tako-venv
