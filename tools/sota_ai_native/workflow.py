@@ -158,9 +158,9 @@ def normalize_evidence_level(raw_level: Any, provider: str) -> str:
             return "MODEL_RECALL"
         if low in ("abstract-based", "full-text") and provider != "fixture":
             # Without verified retrieved text correspondence, do not promote recall to abstract/full-text.
-            return f"NOT_VERIFIED (unbacked_claim={label!r})"
+            return f"MODEL_RECALL (unbacked_claim={label!r})"
         return low
-    return f"NOT_VERIFIED (unsupported_label={label!r})" if label else "NOT_VERIFIED"
+    return f"UNKNOWN (unsupported_label={label!r})" if label else "UNKNOWN"
 
 
 def normalize_authors(raw_authors: Any) -> str:
@@ -370,11 +370,11 @@ def run_role(
         return role_payload, make_usage_record(
             cost_usd=0.0,
             premium_requests=0,
-            request_count=1,
+            request_count=0,
             input_tokens=0,
             output_tokens=0,
             measurement_availability="fixture_zero",
-            provenance="fixture",
+            provenance="offline_fixture",
         )
     if provider == "openai-responses":
         raw, usage = call_openai_responses_web_search(prompt, model=model, allow_paid_api=allow_paid_api)
@@ -466,7 +466,6 @@ def write_ai_native_outputs(
             bib_check=chk,
             has_retrieved_abstract=False,
             has_full_text=False,
-            human_reviewed=False,
         )
         item["Evidence level"] = prov["EVIDENCE_AVAILABILITY"]
         item["Bibliographic status"] = prov["BIBLIOGRAPHIC_STATUS"]
@@ -507,19 +506,27 @@ def write_ai_native_outputs(
         f"- **Research Objective:** {objective}",
         f"- **Papers Analyzed:** {len(papers)} (bibliography: accepted={accounting['accepted']}, candidates={accounting['candidates']}, excluded={accounting['excluded']})",
         f"- **Elapsed Seconds:** {elapsed_seconds:.2f}",
-        f"- **Token Usage:** input={usage_totals.get('input_tokens', 'UNKNOWN')}, output={usage_totals.get('output_tokens', 'UNKNOWN')}, total={usage_totals.get('total_tokens', 'UNKNOWN')}, requests={usage_totals.get('request_count', 'UNKNOWN')}, premium_requests={usage_totals.get('premium_requests', 'UNKNOWN')}, cost_usd={usage_totals.get('cost_usd', 'UNKNOWN')}",
+        f"- **Token Usage:** input={usage_totals.get('input_tokens', 'UNKNOWN')}, output={usage_totals.get('output_tokens', 'UNKNOWN')}, total={usage_totals.get('total_tokens', 'UNKNOWN')}, requests={usage_totals.get('request_count', 'UNKNOWN')}, premium_requests={usage_totals.get('premium_requests', 'UNKNOWN')}, cost_usd={usage_totals.get('cost_usd', 'UNKNOWN')} (availability={usage_totals.get('measurement_availability', 'UNKNOWN')})",
         "",
+    ]
+    if accounting["accepted"] == 0:
+        lines.extend([
+            "> **Empty Accepted Bibliography Notice:** `references.bib` is EMPTY (0 bibliographically verified entries). Unverified or mismatched records are routed to `references_candidates.bib`. Process exit `0` indicates pipeline completion only, not scientific quality `PASS`.",
+            "",
+        ])
+    lines.extend([
         "## 1. Related Research Topics (Researcher)",
         ", ".join(str(t) for t in related_topics) if related_topics else "UNKNOWN",
         "",
         "## 2. Chronological Evolution & Comparative Analysis (Analyst)",
         comp_notes,
         "",
-    ]
+    ])
     for p in chronological:
         lines.extend([
             f"### {p.get('Year', 'UNKNOWN')} — {p.get('Title', 'UNKNOWN')}",
-            f"- **Authors:** {p.get('Authors', 'UNKNOWN')} | **Venue:** {p.get('Publication venue', 'UNKNOWN')} | **Evidence:** `{p.get('Evidence level', 'NOT_VERIFIED')}`",
+            f"- **Authors:** {p.get('Authors', 'UNKNOWN')} | **Venue:** {p.get('Publication venue', 'UNKNOWN')}",
+            f"- **Status:** Bibliographic=`{p.get('Bibliographic status', 'NOT_CHECKED')}` | Evidence=`{p.get('Evidence availability', 'UNKNOWN')}` | Claim support=`{p.get('Claim support status', 'NOT_CHECKED')}` | Human review=`{p.get('Human review status', 'PENDING')}`",
             f"- **Source:** {p.get('DOI or source URL', 'UNKNOWN')}",
             f"- **Contribution:** {p.get('Research contribution', 'NOT_VERIFIED')}",
             f"- **Reported results:** {p.get('Reported results', 'NOT_VERIFIED')}",

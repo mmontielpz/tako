@@ -96,7 +96,7 @@ def discover_works(
 
     dedup: dict[str, dict[str, Any]] = {}
     for w in raw_works:
-        key = (w.get("doi") or w.get("id") or w.get("title") or "").strip().lower()
+        key = (w.get("doi") or w.get("id") or w.get("display_name") or w.get("title") or "").strip().lower()
         if key and key not in dedup:
             dedup[key] = w
 
@@ -277,14 +277,21 @@ def write_outputs(
         f"- **Source Mode:** {source_mode}",
         f"- **Research Objective:** {objective}",
         f"- **Discovery Seeds:** {', '.join(seeds) if seeds else 'None'}",
-        f"- **Papers Selected:** {len(records)}",
+        f"- **Papers Selected:** {len(records)} (bibliography: accepted={len(accepted_items)}, candidates={len(candidate_items)}, excluded=0)",
         "- **Evidence Disclaimer:** Extractions are strictly `abstract-based` or `metadata-only` (no full-text PDF parsing). Missing fields are marked `UNKNOWN` or `NOT_VERIFIED`. Citation counts and venues are not treated as proof of scientific superiority.",
         "",
+    ]
+    if len(accepted_items) == 0:
+        lines.extend([
+            "> **Empty Accepted Bibliography Notice:** `references.bib` is EMPTY (0 bibliographically verified entries). Unverified records are routed to `references_candidates.bib`. Process exit `0` indicates pipeline completion only, not scientific quality `PASS`.",
+            "",
+        ])
+    lines.extend([
         "## 1. Related Research Topics Discovered",
         ", ".join(related_topics) if related_topics else "UNKNOWN",
         "",
         "## 2. Candidate Seminal & Foundational Works",
-    ]
+    ])
     if seminal:
         for r in seminal:
             lines.append(f"- **{r['Year']} — {r['Title']}** ({r['Authors']}) — {r['DOI or source URL']} (`{r['Evidence level']}`)")
@@ -295,7 +302,7 @@ def write_outputs(
     for r in chronological:
         lines.extend([
             f"### {r['Year']} — {r['Title']}",
-            f"- **Authors:** {r['Authors']} | **Venue:** {r['Publication venue']} | **Evidence:** `{r['Evidence level']}`",
+            f"- **Authors:** {r['Authors']} | **Venue:** {r['Publication venue']} | **Status:** Bibliographic=`{r.get('Bibliographic status', 'NOT_CHECKED')}` | Evidence=`{r.get('Evidence availability', r['Evidence level'])}` | Claim support=`{r.get('Claim support status', 'NOT_CHECKED')}`",
             f"- **Source:** {r['DOI or source URL']}",
             f"- **Contribution:** {r['Research contribution']}",
             f"- **Reported results:** {r['Reported results']}",
