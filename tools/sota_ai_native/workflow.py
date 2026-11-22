@@ -720,6 +720,20 @@ def main(argv: list[str] | None = None) -> int:
         print("ERROR: --max-http-requests must be >= 1", file=sys.stderr)
         return 2
 
+    from tools.researcher_setup import SetupConfigError, resolve_effective_discovery_settings
+
+    try:
+        effective_cfg = resolve_effective_discovery_settings(is_fixture=(args.provider == "fixture"))
+    except SetupConfigError as exc:
+        print(f"CONFIG_ERROR: {exc}", file=sys.stderr)
+        return 2
+    if effective_cfg["offline_only"] and args.provider != "fixture":
+        print(
+            "OFFLINE_MODE_BLOCKED: Active user profile 'offline' prohibits live provider network calls; use --provider fixture or reconfigure via 'tako setup'.",
+            file=sys.stderr,
+        )
+        return 2
+
     t0 = time.monotonic()
     fixture_data = None
     if args.provider == "fixture":

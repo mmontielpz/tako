@@ -651,8 +651,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--sources",
-        default="openalex",
-        help="Comma-separated discovery sources (default: openalex; supported: openalex,arxiv,crossref,semantic-scholar)",
+        default=None,
+        help="Comma-separated discovery sources (defaults to user config or 'openalex'; supported: openalex,arxiv,crossref,semantic-scholar)",
     )
     parser.add_argument("--seed", action="append", default=[], help="Related topic seed (repeatable)")
     parser.add_argument("--out-dir", default="sota_output", help="Output directory")
@@ -680,6 +680,25 @@ def main(argv: list[str] | None = None) -> int:
         print("ERROR: --max-http-requests must be >= 1", file=sys.stderr)
         return 2
 
+    from tools.researcher_setup import SetupConfigError, resolve_effective_discovery_settings
+
+    try:
+        effective_cfg = resolve_effective_discovery_settings(
+            cli_sources=args.sources,
+            cli_max_http=args.max_http_requests,
+            is_fixture=(args.fixture is not None),
+        )
+    except SetupConfigError as exc:
+        print(f"CONFIG_ERROR: {exc}", file=sys.stderr)
+        return 2
+
+    if effective_cfg["offline_only"] and args.fixture is None:
+        print(
+            "OFFLINE_MODE_BLOCKED: Active user profile 'offline' prohibits live network discovery; supply --fixture or reconfigure via 'tako setup'.",
+            file=sys.stderr,
+        )
+        return 2
+
     if args.iterative:
         from tools.sota_discovery.engine import build_research_plan, run_iterative_discovery, write_discovery_artifacts
         from tools.sota_discovery.providers import UnsupportedProviderOperationError, get_provider, run_multi_source_search
@@ -702,11 +721,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 2
 
-        effective_max_http = args.max_http_requests if args.max_http_requests is not None else (DEFAULT_SAFE_MAX_HTTP_REQUESTS if args.fixture is None else None)
+        effective_max_http = effective_cfg["max_http_requests"]
         if effective_max_http is not None:
             plan["limits"]["max_http_requests"] = effective_max_http
 
-        sources = [s.strip().lower() for s in str(args.sources or "openalex").split(",") if s.strip()]
+        sources = list(effective_cfg["sources"])
         if not sources:
             sources = ["openalex"]
         plan["sources"] = sources

@@ -7,10 +7,11 @@ import sys
 
 from tools.doctor import run_doctor
 from tools.research_workspace import cmd_evidence, cmd_export, cmd_init, cmd_status
+from tools.researcher_setup import cmd_providers, cmd_setup
 from tools.sota_ai_native.workflow import main as sota_ai_main
 from tools.sota_discovery.sota import main as sota_main
 
-__version__ = "0.0.1.dev9"
+__version__ = "0.0.1.dev10"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -32,6 +33,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("doctor", help="Inspect Python, OS, executables, and provider/local capabilities (no secrets shown)")
+    sub.add_parser("setup", help="Configure research access profile, default sources, and AI assistant", add_help=False)
+    sub.add_parser("providers", help="Inspect scientific discovery provider capabilities", add_help=False)
     sub.add_parser("init", help="Initialize a portable research workspace (tako_workspace.json)", add_help=False)
     sub.add_parser("status", help="Inspect research workspace stage status and quality verdict", add_help=False)
     sub.add_parser("sota", help="Deterministic OpenAlex SOTA discovery (no API key required)", add_help=False)
@@ -42,6 +45,10 @@ def main(argv: list[str] | None = None) -> int:
     ns, rest = parser.parse_known_args(argv)
     if ns.command == "doctor":
         return run_doctor()
+    if ns.command == "setup":
+        return cmd_setup(rest)
+    if ns.command == "providers":
+        return cmd_providers(rest)
     if ns.command == "init":
         return cmd_init(rest)
     if ns.command == "status":
