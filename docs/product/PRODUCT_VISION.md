@@ -1,45 +1,31 @@
-# Product Vision
+# TAKO Product Vision (V2.0 — ARDE)
 
-Status: draft, foundation stage. Nothing here is implemented.
+- **Product:** TAKO
+- **Category:** Agentic Research Development Environment (`ARDE`)
+- **Positioning:** *Your Research Environment, AI Companion & Scientific Ecosystem.*
+- **Tagline:** *From research questions to reproducible scientific knowledge.*
+- **Current Public Release:** `v0.1.0a2` (Experimental CLI; Desktop GUI planned in `P7`).
 
-## Mission
+## 1. Mission
+TAKO evolves from a bounded scientific CLI toolkit into an integrated, local-first Agentic Research Development Environment (`ARDE`) for researchers, scientists, professors, and graduate students.
 
-Help engineers understand, design, implement, test, secure and deliver real systems with AI assistance, while keeping engineering rigor, technical ownership and verifiable results.
+- **Primary Researcher Experience (Target `P7+`):** Researcher-friendly Desktop GUI.
+- **First-Class Automation Interface (Active & Permanent):** CLI (`tako`) for automation, external AI agents (`AGY`, `Codex CLI`, `Claude Code`, `Copilot CLI`), advanced researchers, and reproducible pipelines.
 
-## Target users
+## 2. Six Product Pillars
+1. **Research Environment:** Integrated workspace uniting literature, notes, comparisons, writing, and experiments.
+2. **AI Research Companion:** Context-aware, human-in-the-loop assistant grounded in verified workspace evidence.
+3. **Scientific Knowledge:** Structured bibliographic verification, claims, comparabilities, and research gaps.
+4. **Research Workflows:** Task-oriented scientific flows (SOTA, paper understanding, comparison, hypothesis, experiments) rather than raw technical commands.
+5. **Research Ecosystem:** Open, local-first interoperability with BibTeX/LaTeX, RIS, Zotero, Mendeley, Overleaf, Jupyter, Git/GitHub, discovery APIs, and AI CLIs.
+6. **Scientific Integrity:** Zero fabricated citations, explicit abstention (`INSUFFICIENT_EVIDENCE`), and strict separation of verified vs. candidate evidence.
 
-- Engineers across software, AI/ML, data, cybersecurity, cloud/DevOps/platform and scientific computing.
-- T-shaped practitioners who are deep in one discipline and need reliable breadth in others.
-- Small teams and individuals who want control over their AI tooling rather than a single-vendor lock-in.
+## 3. What TAKO Is Not
+TAKO is **not** merely:
+- A PDF chatbot.
+- A bibliographic search utility.
+- A generic AI assistant.
+- A reference manager.
+- A scientific report generator.
 
-## Core problems
-
-1. AI-generated code is easy to produce and hard to trust; verification is left to the human.
-2. Agent tools run with broad ambient permissions and weak isolation.
-3. Context and decisions are trapped in chat history, so handoffs are not reproducible.
-4. Tooling is fragmented per provider and per discipline.
-
-## Engineering-first differentiators (targets)
-
-- Plans are reviewed before execution.
-- Execution happens in isolated workspaces with explicit permissions.
-- Results come with evidence: diffs, test runs, recorded limitations.
-- Accept/reject remains a human decision.
-- Durable project state that a new agent or engineer can pick up cold.
-
-## Provider and tool independence
-
-The user chooses providers, models, agents, credentials, tools and autonomy levels. TAKO must work without any private service and without a specific vendor.
-
-## Possible future integrations
-
-Claude Code, Codex, GitHub, Databricks, dbt, MLflow, container runtimes. These are candidates, not commitments, and none exist today.
-
-## Non-goals
-
-- Not a vibe-coding tool that optimizes for unreviewed output.
-- Not an autonomous system that pushes, deploys or deletes without authorization.
-- Not tied to a single model provider.
-- Not dependent on T-Ecosystem or any private service.
-- Not a new model, framework or agent runtime built for its own sake.
-- No final technology stack is decided yet (see TAKO-001B).
+It is an integrated, context-aware, evidence-grounded research environment.

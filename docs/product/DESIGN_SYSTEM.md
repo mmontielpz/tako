@@ -1,39 +1,51 @@
-# Design System (foundation)
+# Design System & Workbench Wireframes (ARDE V2.0)
 
-Status: starting tokens for TAKO-004. Small by intent. Contrast ratios below were computed (WCAG relative-luminance formula) during TAKO-001B; they cover only these pairs.
+Status: Foundation tokens preserved from `TAKO-001B` / `TAKO-004`, extended with low-fidelity Desktop workbench wireframes for `P7` (`M029E`).
 
 ## Direction
+Calm, technical, researcher-friendly. Dark theme first, light theme second. Purple (`#B07CFF` / `#5B2FB8`) is the brand accent; pixel-art companion assets are used sparingly; text-heavy reading surfaces stay clean and conventional. Interaction inspiration: GitHub Copilot and Antigravity IDE/ADE (original assets only).
 
-Calm, technical, friendly. Dark theme first, light theme second. Purple is the brand accent; pixel-art is used for the companion and sparingly for icons, not for body UI. Text-heavy surfaces stay clean and conventional.
-
-## Color tokens
-
+## Color Tokens
 | Token | Dark | Light | Notes |
-| --- | --- | --- | --- |
-| `bg` | `#14101F` | `#F6F3FB` | app background |
-| `surface` | `#1E1830` | `#FFFFFF` | panels, cards |
+|---|---|---|---|
+| `bg` | `#14101F` | `#F6F3FB` | App background |
+| `surface` | `#1E1830` | `#FFFFFF` | Panels, cards |
 | `text` | `#E8E4F0` | `#1B1530` | 14.9:1 / 16.0:1 on bg |
 | `text-muted` | `#A79FC0` | `#5E5578` | 7.4:1 / 6.3:1 on bg |
 | `accent` | `#B07CFF` | `#5B2FB8` | 6.4:1 / 7.5:1 on bg |
-| `accent-button` | `#6D3FD0` | `#6D3FD0` | white text 6.4:1 |
-| `success` | `#5FD38D` | tbd | 10.0:1 on dark bg |
-| `warning` | `#F2C14E` | tbd | 11.1:1 on dark bg |
-| `danger` | `#FF6B7A` | tbd | 6.8:1 on dark bg |
+| `accent-button` | `#6D3FD0` | `#6D3FD0` | White text 6.4:1 |
+| `success` | `#5FD38D` | `#1E7E48` | Verified / pass |
+| `warning` | `#F2C14E` | `#9A6700` | Candidate / abstract-only |
+| `danger` | `#FF6B7A` | `#C92A3E` | Blocked / error |
 
-Light-theme status colors are unspecified and must be validated before use. Status is always conveyed by icon + text as well as color.
+## Typography & Spacing
+- System UI font for interface; monospace stack for CLI logs, BibTeX, and diffs (`12 / 14 / 16 / 20 / 28 px`, minimum body `14 px`).
+- 4 px base unit; 6 px control radius; 10 px card radius; visible `accent` focus ring; respect `prefers-reduced-motion` and `NO_COLOR` in CLI.
 
-## Typography
+## Low-Fidelity Desktop Workbench Wireframe
+```text
++-----------------------------------------------------------------------------------+
+| TAKO ARDE  [Workspace: jetseg-evolution v]  [Task: Create SOTA v]   [Free | AGY]  |
++-------------------+-----------------------------------+---------------------------+
+| WORKSPACE         | [SOTA Studio] [Paper: BiSeNet]    | RESEARCH COMPANION (AGY)  |
+| - Library (15)    |-----------------------------------|---------------------------|
+| - SOTA Matrix     | Round 2/3 [=====>   ] 12/24 HTTP  | Context: BiSeNet (2018)   |
+| - Claims & Gaps   | [x] BiSeNet (VERIFIED, ABSTRACT)  |                           |
+| - Notebook        | [x] DDRNet  (VERIFIED, FULL_TEXT) | > Compare BiSeNet vs      |
+| - References.bib  | [!] Candidate-48 (UNVERIFIED)     |   DDRNet latency on Orin  |
+|                   |                                   |                           |
+|                   | [Approve Selection] [Export Bib]  | [Evidence-grounded reply] |
++-------------------+-----------------------------------+---------------------------+
+| Status: EXPLORATORY_LITERATURE_MAP | 15/15 Bib Verified | 0 Paid API Calls        |
++-----------------------------------------------------------------------------------+
+```
 
-System UI font for interface; a monospace stack for code, diffs and logs. Scale: 12 / 14 / 16 / 20 / 28 px. No custom font dependency in the MVP.
-
-## Spacing and shape
-
-4 px base unit (4, 8, 12, 16, 24, 32). Radius 6 px for controls, 10 px for cards. Pixel-art assets scale only by integers with `image-rendering: pixelated`.
-
-## Components needed first
-
-State chip, button (primary/secondary/destructive), checklist (permissions), diff viewer (read-only), log viewer (collapsible), evidence card, banner (info/warn/error), companion panel.
-
-## Rules
-
-Visible focus ring in `accent`; respect `prefers-reduced-motion`; minimum body text 14 px; no information by color alone.
+## Simplified Onboarding & Task Selection Wireframe
+```text
++---------------------------------------------------------------+
+| Welcome to TAKO — Select Research Task                        |
+|  [1] Create a State of the Art   [2] Quick Literature Review  |
+|  [3] Understand a Paper          [4] Compare Papers           |
+|  Setup: Profile=Free | AI CLI=AGY (detected) [Advanced v]     |
++---------------------------------------------------------------+
+```
