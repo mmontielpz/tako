@@ -16,16 +16,15 @@ class TakoCliTests(unittest.TestCase):
             with redirect_stdout(buf):
                 main(["--version"])
         self.assertEqual(ctx.exception.code, 0)
-        self.assertIn("0.0.1.dev6", buf.getvalue())
+        self.assertIn("0.0.1.dev7", buf.getvalue())
 
         buf2 = io.StringIO()
         with self.assertRaises(SystemExit) as ctx2:
             with redirect_stdout(buf2):
                 main(["--help"])
         self.assertEqual(ctx2.exception.code, 0)
-        self.assertIn("doctor", buf2.getvalue())
-        self.assertIn("sota-ai", buf2.getvalue())
-        self.assertIn("evidence", buf2.getvalue())
+        for cmd in ("doctor", "init", "status", "sota", "sota-ai", "evidence", "export"):
+            self.assertIn(cmd, buf2.getvalue())
 
     def test_doctor_reports_status_without_leaking_secrets(self):
         buf = io.StringIO()

@@ -5,6 +5,19 @@ All notable changes to the public TAKO repository are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [PEP 440](https://peps.python.org/pep-0440/) / [SemVer](https://semver.org/) for releases.
 
+## [Unreleased] — `0.0.1.dev7` Candidate (P4: CLI Product Experience)
+
+### Added
+- Portable research workspace & researcher-facing CLI (`tools/research_workspace.py`):
+  - `tako init` & `tako status` managing inspectable `tako_workspace.json` (`tako-workspace/v1`) without storing credentials.
+  - `tako evidence --source` supporting local `.txt`, `.md`, `.json`, `.bib`, `.ris`, and JATS `.xml`/`.jats` ingestion, with explicit unsupported-format rejection for `.pdf`, path-traversal/symlink safety checks, output collision protection (`--force`), and hash-verified `--resume`.
+  - `tako export` producing portable Markdown, CSV, JSON, BibTeX, and RIS (`references.ris`) bundles with `artifact_inventory.json`.
+  - Enhanced `tako doctor` capability reporting separating installed, configured, authenticated, previously qualified, and unsupported capabilities.
+- Targeted scientific closeout fixes (`M022A-R07` and `M022A-R08`) in `tools/sota_evidence.py`:
+  - `compare_papers` requires `author_reported` provenance across both papers before granting `DIRECTLY_COMPARABLE`, distinguishing `structural_compatibility` from `verified_scientific_comparability` and `eligible_to_publish_numerical_comparisons`.
+  - `acquire_evidence` removes length-based `FULL_PUBLICATION` inference (`>= 500` chars) and separates `researcher_declared_completeness`, `observed_document_structure`, and verified completeness.
+- Researcher Experience regression suite (`tests/sota_ai_native/test_cli_product_experience.py`, `RX01`–`RX20`).
+
 ## [Unreleased] — `0.0.1.dev6` Candidate (Increment C: Evidence & Comparative SOTA)
 
 ### Added

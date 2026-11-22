@@ -146,6 +146,9 @@ def acquire_evidence(paper: dict[str, Any]) -> dict[str, Any]:
     if pdf_url and not full_text:
         limitations.append("pdf_url present without parsed full-text; PDF parsing not supported.")
 
+    researcher_declared_completeness = str(paper.get("document_completeness") or "UNDECLARED").strip()
+    observed_structure = "NONE"
+
     if explicit_avail == EVIDENCE_MODEL_RECALL and not full_text:
         avail = EVIDENCE_MODEL_RECALL
         content = ""
@@ -160,12 +163,23 @@ def acquire_evidence(paper: dict[str, Any]) -> dict[str, Any]:
         locator = str(paper.get("evidence_locator") or "full_text")
         ext_method = "plain_text_ingestion" if from_local_file else "researcher_supplied_text"
         ext_origin = "local_file" if from_local_file else "researcher_supplied_text"
-        doc_completeness = (
-            "FULL_PUBLICATION"
-            if (paper.get("document_completeness") == "FULL_PUBLICATION" or (from_local_file and len(full_text) >= 500))
-            else "PARTIAL_EXCERPT"
-        )
-        if doc_completeness != "FULL_PUBLICATION":
+        has_pages = bool(_extract_pages({"_text": content, "pages": paper.get("pages")}))
+        has_secs = bool(_extract_sections({"_text": content, "sections": paper.get("sections")}))
+        if has_pages and has_secs:
+            observed_structure = "PAGINATED_AND_SECTIONED"
+        elif has_secs:
+            observed_structure = "SECTIONED"
+        elif has_pages:
+            observed_structure = "PAGINATED"
+        else:
+            observed_structure = "UNSTRUCTURED_TEXT"
+        if paper.get("completeness_verified") is True:
+            doc_completeness = "VERIFIED_COMPLETE_PUBLICATION"
+        elif researcher_declared_completeness == "FULL_PUBLICATION":
+            doc_completeness = "DECLARED_COMPLETE_UNVERIFIED"
+            limitations.append("Researcher declared FULL_PUBLICATION without independent completeness verification.")
+        else:
+            doc_completeness = "PARTIAL_EXCERPT"
             limitations.append("Supplied full_text is a partial excerpt; complete publication retrieval not verified.")
     elif abstract:
         avail = EVIDENCE_ABSTRACT_BASED
@@ -174,6 +188,7 @@ def acquire_evidence(paper: dict[str, Any]) -> dict[str, Any]:
         ext_method = "abstract_text"
         ext_origin = "provider_abstract"
         doc_completeness = "ABSTRACT_ONLY"
+        observed_structure = "ABSTRACT_ONLY"
     elif model_desc:
         avail = EVIDENCE_MODEL_RECALL
         content = ""
@@ -181,7 +196,6 @@ def acquire_evidence(paper: dict[str, Any]) -> dict[str, Any]:
         ext_method = "model_recall"
         ext_origin = "model_recall"
         doc_completeness = "NONE"
-        limitations.append("Model-generated summary is not retrieved scientific evidence.")
     elif paper.get("Title"):
         avail = EVIDENCE_METADATA_ONLY
         content = ""
@@ -203,6 +217,8 @@ def acquire_evidence(paper: dict[str, Any]) -> dict[str, Any]:
         "retrieval_method": retrieval_method,
         "availability_status": avail,
         "document_completeness": doc_completeness,
+        "researcher_declared_completeness": researcher_declared_completeness,
+        "observed_document_structure": observed_structure,
         "extraction_origin": ext_origin,
         "source_identifier": source_url,
         "content_hash": _sha256_text(content) if content else None,
@@ -628,7 +644,10 @@ def compare_papers(
             if ev1["availability_status"] in (EVIDENCE_METADATA_ONLY, EVIDENCE_MODEL_RECALL, EVIDENCE_UNAVAILABLE) or ev2["availability_status"] in (EVIDENCE_METADATA_ONLY, EVIDENCE_MODEL_RECALL, EVIDENCE_UNAVAILABLE):
                 reasons.append("insufficient_evidence_availability")
 
-            if e1["provenance"] == "unverified_or_missing" or e2["provenance"] == "unverified_or_missing":
+            structural_reasons = [r for r in reasons if not r.startswith(("unverified_extraction_provenance", "insufficient_evidence_availability"))]
+            structural_compat = "STRUCTURALLY_COMPATIBLE" if (not structural_reasons and metric_pairs) else "STRUCTURALLY_INCOMPATIBLE"
+
+            if e1["provenance"] != "author_reported" or e2["provenance"] != "author_reported":
                 reasons.append("unverified_extraction_provenance")
 
             if not reasons and metric_pairs:
@@ -642,10 +661,15 @@ def compare_papers(
             else:
                 comp_class = COMP_CONDITIONAL
 
+            eligible_publish = (comp_class == COMP_DIRECT and len(metric_pairs) > 0 and e1["provenance"] == "author_reported" and e2["provenance"] == "author_reported")
+
             comparisons.append({
                 "paper_1": id1,
                 "paper_2": id2,
                 "comparability_class": comp_class,
+                "structural_compatibility": structural_compat,
+                "verified_scientific_comparability": comp_class,
+                "eligible_to_publish_numerical_comparisons": eligible_publish,
                 "reasons": reasons or ["matching_dataset_protocol_conditions_and_metrics"],
                 "normalized_metric_pairs": metric_pairs,
                 "global_ranking_permitted": False,
