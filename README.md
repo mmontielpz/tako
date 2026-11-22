@@ -12,7 +12,7 @@
 
 TAKO is an open-source, experimental **Agentic Research Development Environment (ARDE)** built for researchers and engineers who want bounded, traceable, evidence-grounded literature discovery and synthesis without sacrificing scientific integrity or local ownership.
 
-> **Status:** Experimental CLI (`0.0.1.dev10` on `develop`; legacy preview `v0.0.1.dev3` published). Tested natively on **Ubuntu Linux** (Python `3.9, 3.12, 3.13, 3.14`) and **Windows** (Python `3.12`). Native macOS is `NOT_TESTED`. TAKO Desktop is **planned** (`P7`).
+> **Status:** Experimental CLI (`0.1.0a1` candidate on `develop`; legacy preview `v0.0.1.dev3` published). Tested natively on **CachyOS / Ubuntu Linux** (Python `3.9, 3.12, 3.13, 3.14`) and **Windows** (Python `3.12`). Native macOS is `NOT_TESTED`. TAKO Desktop is **planned** (`P7`).
 
 ---
 
@@ -34,14 +34,14 @@ Install TAKO in an isolated virtual environment (`--no-deps`, Python `>= 3.9` re
 ```powershell
 # Windows (PowerShell)
 python -m venv .tako-venv
-.\.tako-venv\Scripts\python.exe -m pip install --no-deps tako_researcher_preview-0.0.1.dev10-py3-none-any.whl
+.\.tako-venv\Scripts\python.exe -m pip install --no-deps tako_researcher_preview-0.1.0a1-py3-none-any.whl
 .\.tako-venv\Scripts\tako.exe --version
 ```
 
 ```bash
 # Ubuntu / Linux
 python3 -m venv .tako-venv
-.tako-venv/bin/pip install --no-deps tako_researcher_preview-0.0.1.dev10-py3-none-any.whl
+.tako-venv/bin/pip install --no-deps tako_researcher_preview-0.1.0a1-py3-none-any.whl
 .tako-venv/bin/tako --version
 ```
 

@@ -30,7 +30,7 @@ class CliProductExperienceTests(unittest.TestCase):
             with redirect_stdout(buf):
                 cli_main(["--version"])
         self.assertEqual(ctx.exception.code, 0)
-        self.assertIn("0.0.1.dev10", buf.getvalue())
+        self.assertIn("0.1.0a1", buf.getvalue())
 
         buf_doc = io.StringIO()
         with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "sk-secret-rx18-never-leak"}):

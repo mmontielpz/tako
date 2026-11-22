@@ -5,7 +5,17 @@ All notable changes to the public TAKO repository are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [PEP 440](https://peps.python.org/pep-0440/) / [SemVer](https://semver.org/) for releases.
 
-## [Unreleased] — `0.0.1.dev8` Candidate (P4: Runtime, Security & Provider Qualification)
+## [Unreleased] — `0.1.0a1` Experimental Alpha Candidate (P4 Closeout)
+
+### Added
+- Multi-source scientific discovery (`tools/sota_discovery/providers.py`) with `OpenAlex`, `arXiv` (Atom 1.0 XML), `Crossref`, optional `Semantic Scholar`, and `Google Scholar` manual-assisted URL/import contract, plus 20-source `PROVIDER_REGISTRY`.
+- Provider-specific pacing, `Retry-After` handling, and safe default HTTP budget (`DEFAULT_SAFE_MAX_HTTP_REQUESTS=24`) in `HttpRequestTracker`.
+- M024B corrective fixes (`F01` corpus size contract, `F02` query relevance & generic concept filtering, `F03` multi-term screening precision) and cross-source arXiv/DOI deduplication with preprint/published linking.
+- Adaptive Research Setup Wizard (`tako setup`, `tako providers list`, enhanced `tako doctor` in `tools/researcher_setup.py`) with 5 access profiles (`free`, `hybrid`, `institutional`, `paid`, `offline`), non-secret user config, and offline network refusal.
+- Minimal local Linux installer/uninstaller (`scripts/install-linux.sh`, `scripts/uninstall-linux.sh`) for CachyOS-first Researcher Starter Kit (`0.1.0a1`).
+- Reconciled `README.md`, `CITATION.cff`, `SECURITY.md`, `docs/assets/*.svg`, and `docs/architecture/ARDE_ARCHITECTURE_DIAGRAMS.md`.
+
+## [0.0.1.dev8] — Historical `develop` Milestone (P4: Runtime, Security & Provider Qualification)
 
 ### Added
 - Observable HTTP transport telemetry (`HttpRequestTracker`, `HttpBudgetExhaustedError` in `tools/sota_discovery/sota.py` and `tools/sota_discovery/engine.py`) separating `logical_operations` from `observable_http_telemetry` (`http_attempts`, `http_successes`, `http_failures`, `retries`, `cached_operations`, `redirects_observed`, `budget_exhausted`).
