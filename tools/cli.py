@@ -10,7 +10,7 @@ from tools.research_workspace import cmd_evidence, cmd_export, cmd_init, cmd_sta
 from tools.sota_ai_native.workflow import main as sota_ai_main
 from tools.sota_discovery.sota import main as sota_main
 
-__version__ = "0.0.1.dev8"
+__version__ = "0.0.1.dev9"
 
 
 def main(argv: list[str] | None = None) -> int:
