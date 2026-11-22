@@ -1,36 +1,45 @@
-# TAKO Researcher Preview — Windows Quickstart (`0.0.1.dev2`)
+# TAKO Researcher Preview — Windows Quickstart (`0.0.1.dev3`)
 
-**No Administrator privileges, PowerShell ExecutionPolicy changes, or Rust compilation required.**
+**Experimental research software. No Administrator privileges, PowerShell ExecutionPolicy changes, venv activation, or Rust compilation required.**  
+**Platform Notice:** Validated on Linux (`x86_64`, Python `3.14.10`); Windows runtime is `NOT_TESTED`.
 
-## 1. Clone the Experimental Branch
+## Prerequisites
+- **Python 3.9+** (`py --version`)
+- **Internet access** for live OpenAlex queries (`tako sota` / `--verify-bib`)
+- **Authenticated Copilot CLI** (`copilot login`) for AI-native `copilot-cli` experiments
+
+## 1. Option A — Direct Wheel Download & Install (Recommended)
+Download `tako_researcher_preview-0.0.1.dev3-py3-none-any.whl` from [v0.0.1.dev3](https://github.com/mmontielpz/tako/releases/tag/v0.0.1.dev3) (`SHA-256: f2fa79ff14878595657fa85d67f1d60fbf0ac7a3f74c9b90aa326f17f8bb6606`), then run:
+```powershell
+py -m venv .tako-venv
+.\.tako-venv\Scripts\python.exe -m pip install --no-index --no-deps .\tako_researcher_preview-0.0.1.dev3-py3-none-any.whl
+```
+
+## 1. Option B — Install Directly from Branch
 ```powershell
 git clone --branch experiment/researcher-preview --single-branch https://github.com/mmontielpz/tako.git tako-preview
 cd tako-preview
-```
-
-## 2. Create Python Virtual Environment & Install Directly from Branch
-```powershell
 py -m venv .tako-venv
 .\.tako-venv\Scripts\python.exe -m pip install --no-deps .
 ```
 
-## 3. Check Environment & Providers
+## 2. Check Environment & Providers (`doctor`)
 ```powershell
 .\.tako-venv\Scripts\tako.exe --version
 .\.tako-venv\Scripts\tako.exe doctor
 ```
 
-## 4. Offline First-Use Experiment (Bundled Fixture)
+## 3. Offline Fixture Experiment (No Internet or API Key)
 ```powershell
 .\.tako-venv\Scripts\tako.exe sota-ai `
   --topic "Quantum Reservoir Computing" `
   --objective "Offline fixture test" `
   --provider fixture `
   --with-reviewer `
-  --out-dir .\sota_fixture_test
+  --out-dir .\experiments\fixture
 ```
 
-## 5. Live OpenAlex SOTA Discovery (No LLM Credentials Required)
+## 4. OpenAlex SOTA Discovery (No LLM Credentials Required)
 ```powershell
 .\.tako-venv\Scripts\tako.exe sota `
   --topic "Quantum Reservoir Computing" `
@@ -41,18 +50,35 @@ py -m venv .tako-venv
   --seed "Liquid State Machines" `
   --seed "Quantum Reservoir Computing" `
   --seed "Quantum circuit architectures" `
-  --out-dir .\sota_output
+  --out-dir .\experiments\openalex
 ```
 
-## 6. Experiment with Authenticated Copilot or Claude CLI
-Ensure `copilot login` (or `claude`) is authenticated in your session, then pass `--allow-paid-api`:
+## 5. Full Copilot Researcher + Analyst + Reviewer Experiment
+Ensure `copilot login` is authenticated, then pass `--allow-paid-api`:
 ```powershell
 .\.tako-venv\Scripts\tako.exe sota-ai `
   --topic "Quantum Reservoir Computing" `
-  --objective "Identify foundational classical and quantum reservoir computing works, important methodological developments, contributions and limitations." `
+  --objective "Identify foundational classical and quantum reservoir computing works, important methodological developments, contributions, reported results and limitations." `
   --provider copilot-cli `
   --allow-paid-api `
   --verify-bib `
-  --out-dir .\sota_copilot_output
+  --with-reviewer `
+  --out-dir .\experiments\copilot
 ```
-(Replace `--provider copilot-cli` with `--provider claude-cli` to use Claude Code CLI.)
+
+## 6. Using Your Own Research Topic & Objective
+Replace `--topic`, `--objective`, `--seed`, and `--out-dir` with your own domain:
+```powershell
+.\.tako-venv\Scripts\tako.exe sota-ai `
+  --topic "<Your Research Topic>" `
+  --objective "<Your specific research question or comparison goal>" `
+  --provider copilot-cli `
+  --allow-paid-api `
+  --verify-bib `
+  --with-reviewer `
+  --out-dir .\experiments\my-topic
+```
+
+## Expected Outputs & Feedback
+Each `sota-ai` run writes `sota_report.md`, `literature_matrix.csv`, `references.bib`, `review_report.md`, and `stage_01`–`stage_04` JSONs inside `--out-dir`.  
+Submit feedback at https://github.com/mmontielpz/tako/issues (**PUBLIC repository**: never post credentials or confidential research).

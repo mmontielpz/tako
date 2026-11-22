@@ -91,7 +91,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Report security issues as described in [
 
 ## Experimental Researcher Preview (`0.0.1.dev3`)
 
-Install without shell activation:
+Download the wheel from [Release v0.0.1.dev3](https://github.com/mmontielpz/tako/releases/tag/v0.0.1.dev3) or install directly from `experiment/researcher-preview` without shell activation:
 - **Linux (Bash or Fish):** `python3 -m venv .tako-venv && ./.tako-venv/bin/pip install --no-deps . && ./.tako-venv/bin/tako doctor`
 - **Windows (PowerShell):** `py -m venv .tako-venv ; .\.tako-venv\Scripts\python.exe -m pip install --no-deps . ; .\.tako-venv\Scripts\tako.exe doctor`
 
