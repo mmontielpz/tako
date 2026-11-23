@@ -7,14 +7,14 @@ set -euo pipefail
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/mmontielpz/tako/main/install.sh | bash
-#   bash install.sh --version v0.1.0a2
+#   bash install.sh --version v0.1.0a3
 #
 # Security & Trust Model:
 #   Downloads release assets and SHA256SUMS over HTTPS from GitHub Releases.
 #   Same-origin SHA256SUMS verifies download integrity against the release host,
 #   NOT independent cryptographic publisher authentication (GPG/Sigstore).
 
-DEFAULT_RELEASE_TAG="v0.1.0a2"
+DEFAULT_RELEASE_TAG="v0.1.0a3"
 DEFAULT_BASE_URL="https://github.com/mmontielpz/tako/releases/download"
 
 TAKO_HOME="${TAKO_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/tako}"

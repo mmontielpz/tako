@@ -208,6 +208,7 @@ pub struct Bridge {
     integration: integration::OptionalTIntegration,
     proposals: providers::ProposalService,
     workspace: workspace::Workspace,
+    sota_jobs: Arc<python_sota::SotaJobManager>,
     onboarding_engineering_open: AtomicBool,
     connections: provider_connection::Connections,
 }
@@ -346,6 +347,7 @@ impl Bridge {
             integration: integration::OptionalTIntegration::new(client),
             proposals: providers::ProposalService::default(),
             workspace: workspace::Workspace::default(),
+            sota_jobs: Arc::new(python_sota::SotaJobManager::default()),
             onboarding_engineering_open: AtomicBool::new(false),
             connections: provider_connection::Connections::default(),
         })
@@ -358,7 +360,7 @@ impl Bridge {
     /// Single entry point used by the Tauri command and the test harness.
     pub fn dispatch(&self, cmd: &str, args: Value) -> Result<Value, BridgeError> {
         if python_sota::handles(cmd) {
-            return python_sota::dispatch(cmd, args);
+            return python_sota::dispatch(&self.sota_jobs, cmd, args);
         }
         if cmd.starts_with("research_") || research::planning::handles(cmd) {
             return research::dispatch(&self.data_dir, cmd, args);

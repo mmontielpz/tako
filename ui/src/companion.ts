@@ -190,3 +190,84 @@ export function companionFor(ctx: CompanionContext): CompanionSay {
       return { pose: "idle", headline: "Rejected.", detail: "The workspace was discarded; your project is unchanged. Evidence is kept.", ...base };
   }
 }
+
+export interface ResearchCompanionContext {
+  hasWorkspace: boolean;
+  workspaceId?: string | null;
+  topic: string;
+  objective: string;
+  jobStatus: string | null;
+  acceptedCount: number | null;
+  candidateCount: number | null;
+  evidenceSufficient: boolean | null;
+  eventCount: number;
+  exportedCount: number;
+  error: string | null;
+}
+
+/** Research Mate guidance derived strictly from actual workspace and SOTA workflow state. */
+export function researchCompanionFor(ctx: ResearchCompanionContext): CompanionSay {
+  if (ctx.error) {
+    return {
+      pose: "alert",
+      headline: "Research step blocked",
+      detail: ctx.error,
+      next: "Review the error details and workspace or runtime settings.",
+      evidenceId: null,
+    };
+  }
+  if (!ctx.hasWorkspace) {
+    return {
+      pose: "waiting",
+      headline: "Ready to start research",
+      detail: "Create a new research workspace or open an existing one. No Git repository or API key is required.",
+      next: "Enter a workspace folder path and choose Create or Open workspace.",
+      evidenceId: null,
+    };
+  }
+  if (ctx.jobStatus === "running") {
+    return {
+      pose: "working",
+      headline: "Running offline SOTA workflow",
+      detail: `Topic: ${ctx.topic || "Unspecified"}. Executing against the isolated Python core in offline fixture mode.`,
+      next: "Monitor workflow events or cancel the active job if needed.",
+      evidenceId: null,
+    };
+  }
+  if (ctx.jobStatus === "cancelled") {
+    return {
+      pose: "waiting",
+      headline: "Workflow cancelled",
+      detail: "The active subprocess was stopped and cleaned up. Existing workspace artifacts are preserved.",
+      next: "Adjust configuration or start another offline workflow.",
+      evidenceId: null,
+    };
+  }
+  if (ctx.evidenceSufficient === false) {
+    return {
+      pose: "alert",
+      headline: "Insufficient scientific evidence",
+      detail: `Topic: ${ctx.topic || "Unspecified"}. Accepted: ${ctx.acceptedCount ?? 0} (${ctx.candidateCount ?? 0} candidates). Do not treat this as a sufficient SOTA.`,
+      next: "Supply a richer fixture or inspect screening decisions.",
+      evidenceId: ctx.workspaceId ?? null,
+    };
+  }
+  if ((ctx.acceptedCount ?? 0) > 0) {
+    return {
+      pose: "idle",
+      headline: "Offline SOTA results ready",
+      detail: `Topic: ${ctx.topic || "Unspecified"}. Accepted: ${ctx.acceptedCount} publication(s), ${ctx.eventCount} event(s)${ctx.exportedCount > 0 ? `, ${ctx.exportedCount} exported artifact(s)` : ""}.`,
+      next: ctx.exportedCount > 0
+        ? "Reopen this workspace anytime to inspect saved artifacts."
+        : "Export portable artifacts (Markdown, CSV, JSON, BibTeX, RIS).",
+      evidenceId: ctx.workspaceId ?? null,
+    };
+  }
+  return {
+    pose: "idle",
+    headline: "Research workspace open",
+    detail: `Topic: ${ctx.topic || "Unspecified"}. Objective: ${ctx.objective || "Unspecified"}.`,
+    next: "Run Offline Discovery or Offline AI-Native (Fixture) to begin.",
+    evidenceId: ctx.workspaceId ?? null,
+  };
+}

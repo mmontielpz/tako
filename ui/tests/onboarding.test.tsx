@@ -1,48 +1,86 @@
 import { useState } from "preact/hooks";
 import { afterEach, describe, expect, it } from "vitest";
-import { WelcomeWizard } from "../src/WelcomeWizard";
-import { click, mount, must, q, tick, waitFor } from "./helpers/dom";
+import { WelcomeWizard, type OnboardingViewState } from "../src/WelcomeWizard";
+import { click, mount, must, q, tick, type, waitFor } from "./helpers/dom";
 
 let ui: ReturnType<typeof mount> | null = null;
-afterEach(() => { ui?.unmount(); ui = null; });
-function Harness() {
-  const [screen, setScreen] = useState<"welcome" | "choose">("welcome");
-  const [selected, setSelected] = useState(false);
-  return <WelcomeWizard screen={screen} selected={selected} pending={false} restoring={false} error={null}
-    onContinue={() => setScreen("choose")} onBack={() => setScreen("welcome")} onSelect={() => setSelected(true)} onOpen={() => { throw new Error("Enter on a radio must not open"); }} onRetryRead={() => {}} />;
+afterEach(() => {
+  ui?.unmount();
+  ui = null;
+});
+
+function Harness({ initial = "FIRST_RUN" as OnboardingViewState, lastPath = null as string | null }) {
+  const [view, setView] = useState<OnboardingViewState>(initial);
+  const [wsPath, setWsPath] = useState("");
+  const [topic, setTopic] = useState("State of the Art Survey");
+  const [objective, setObjective] = useState("Identify foundational works and evidence");
+  return (
+    <WelcomeWizard
+      view={view}
+      pending={false}
+      error={null}
+      lastWorkspacePath={lastPath}
+      lastTopic="Edge AI"
+      workspacePath={wsPath}
+      topic={topic}
+      objective={objective}
+      onWorkspacePathChange={setWsPath}
+      onTopicChange={setTopic}
+      onObjectiveChange={setObjective}
+      onGoCreate={() => setView("CREATE_RESEARCH")}
+      onGoOpen={() => setView("OPEN_RESEARCH")}
+      onGoWelcome={() => setView("FIRST_RUN")}
+      onGoHome={() => setView(lastPath ? "RETURNING_USER" : "FIRST_RUN")}
+      onResumeLast={() => {}}
+      onCreateWorkspace={() => {}}
+      onOpenWorkspace={() => {}}
+      onEnterDirectly={() => {}}
+      onRetryRead={() => {}}
+    />
+  );
 }
 
-describe("approved Welcome/selector accessibility and local presentation", () => {
-  it("has a labelled temporary brand slot and no provider/account inputs", async () => {
-    ui = mount(<Harness />); await tick();
-    expect(document.body.textContent).toContain("TEMPORARY PLACEHOLDER");
-    expect(document.querySelector("input")).toBeNull();
+describe("research-first WelcomeWizard and Research Home", () => {
+  it("FIRST_RUN shows Welcome to TAKO without Engineering/Research selection", async () => {
+    ui = mount(<Harness />);
+    await tick();
+    expect(document.body.textContent).toContain("Welcome to TAKO");
+    expect(document.body.textContent).not.toContain("TEMPORARY PLACEHOLDER");
+    expect(document.body.textContent).not.toContain("Research unavailable");
     expect(document.activeElement).toBe(q("welcome-heading"));
   });
-  it("discloses guidance only on request and Escape returns focus to Setup options", async () => {
-    ui = mount(<Harness />); await click("setup-options");
+
+  it("discloses offline runtime guidance on request and Escape returns focus", async () => {
+    ui = mount(<Harness />);
+    await click("setup-options");
     expect(q("setup-options")!.getAttribute("aria-expanded")).toBe("true");
-    expect(q("setup-guidance-copy")).toBeNull(); await click("setup-guidance");
-    expect(q("setup-guidance-copy")!.textContent).toContain("continue without configuring anything");
+    await click("setup-guidance");
+    expect(q("setup-guidance-copy")!.textContent).toContain("isolated TAKO Python runtime");
     q("setup-guidance")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-    await tick(); expect(q("setup-options")!.getAttribute("aria-expanded")).toBe("false");
+    await tick();
+    expect(q("setup-options")!.getAttribute("aria-expanded")).toBe("false");
     expect(document.activeElement).toBe(q("setup-options"));
   });
-  it("keyboard Space selects Engineering; Enter on that radio does not open it", async () => {
-    ui = mount(<Harness />); await click("welcome-continue");
-    const radio = must<HTMLInputElement>("workspace-engineering"); radio.focus();
-    radio.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true })); await tick();
-    expect(must<HTMLInputElement>("workspace-engineering").checked).toBe(true);
-    expect(must<HTMLButtonElement>("workspace-open").disabled).toBe(false);
-    radio.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })); await tick();
-    expect(q("workspace-heading")).not.toBeNull();
+
+  it("CREATE_RESEARCH validates workspace folder, topic, and objective without Git", async () => {
+    ui = mount(<Harness />);
+    await click("welcome-create");
+    await waitFor("create view", () => !!q("onboarding-ws-path"));
+    expect(must<HTMLButtonElement>("workspace-create-enter").disabled).toBe(true);
+    await type("onboarding-ws-path", "/tmp/my_research_ws");
+    expect(must<HTMLButtonElement>("workspace-create-enter").disabled).toBe(false);
+    await click("workspace-back");
+    await waitFor("back to welcome", () => document.activeElement === q("welcome-heading"));
   });
-  it("disabled Research has a readable keyboard-reachable explanation, separate from selection", async () => {
-    ui = mount(<Harness />); await click("welcome-skip");
-    const note = must<HTMLElement>("research-unavailable"); note.focus();
-    expect(document.activeElement).toBe(note); expect(note.getAttribute("aria-label")).toContain("Research unavailable");
-    expect(must<HTMLInputElement>("workspace-research").disabled).toBe(true);
-    expect(must<HTMLInputElement>("workspace-engineering").checked).toBe(false);
-    await click("workspace-back"); await waitFor("welcome focus", () => document.activeElement === q("welcome-heading"));
+
+  it("RETURNING_USER shows Research Home with Resume, Create, Open, and View Welcome", async () => {
+    ui = mount(<Harness initial="RETURNING_USER" lastPath="/tmp/saved_ws" />);
+    await tick();
+    expect(q("research-home-heading")!.textContent).toContain("Research Home");
+    expect(q("home-resume-last")).not.toBeNull();
+    expect(q("home-last-path")!.textContent).toContain("/tmp/saved_ws");
+    expect(q("home-create-research")).not.toBeNull();
+    expect(q("home-open-research")).not.toBeNull();
+    expect(q("home-view-welcome")).not.toBeNull();
   });
 });

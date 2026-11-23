@@ -343,3 +343,220 @@ impl TapCreate for PathBuf {
         self
     }
 }
+
+fn pid_alive(pid: i32) -> bool {
+    #[cfg(unix)]
+    unsafe {
+        if libc::kill(pid, 0) == 0 {
+            // Check not zombie in /proc/<pid>/stat
+            let stat_path = format!("/proc/{pid}/stat");
+            if let Ok(stat) = fs::read_to_string(&stat_path) {
+                if let Some(rparen) = stat.rfind(')') {
+                    let state = stat[rparen + 2..].chars().next();
+                    return state != Some('Z');
+                }
+            }
+            true
+        } else {
+            false
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+        false
+    }
+}
+
+#[test]
+fn negative_untrusted_runtime_and_export_failure() {
+    let tmp = TempDir::new("untrusted");
+    let bridge = Bridge::open(tmp.path().join("data").tap_create()).unwrap();
+    let ws = create_valid_workspace(tmp.path());
+
+    // 1. Symlinked runtime executable rejected
+    let real_cli = write_exec(
+        tmp.path(),
+        "tako_real",
+        "#!/usr/bin/env bash\necho 'tako 0.1.0a3'\n",
+    );
+    let sym_cli = tmp.path().join("tako_sym");
+    symlink(&real_cli, &sym_cli).unwrap();
+    let err = bridge
+        .dispatch(
+            "sota_resolve_runtime",
+            json!({"runtime_executable": sym_cli.to_string_lossy()}),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, "untrusted_runtime");
+
+    // 2. Runtime inside workspace rejected
+    let ws_cli = write_exec(
+        &ws,
+        "tako_in_ws",
+        "#!/usr/bin/env bash\necho 'tako 0.1.0a3'\n",
+    );
+    let fx = tmp.path().join("fx.json");
+    fs::write(&fx, "{\"results\":[]}").unwrap();
+    let err = bridge
+        .dispatch(
+            "sota_run_discovery",
+            json!({
+                "workspace_path": ws.to_string_lossy(),
+                "fixture_path": fx.to_string_lossy(),
+                "runtime_executable": ws_cli.to_string_lossy()
+            }),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, "untrusted_runtime");
+
+    // 3. Export failure when no run dir exists preserves workspace
+    let fail_export = write_exec(
+        tmp.path(),
+        "tako_exp_fail",
+        "#!/usr/bin/env bash\nif [ \"$1\" = \"--version\" ]; then echo 'tako 0.1.0a3'; exit 0; fi\necho 'EXPORT_ERROR: missing' >&2\nexit 2\n",
+    );
+    let err = bridge
+        .dispatch(
+            "sota_export",
+            json!({
+                "workspace_path": ws.to_string_lossy(),
+                "out_dir": "export_out",
+                "runtime_executable": fail_export.to_string_lossy()
+            }),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, "subprocess_failed");
+    assert!(ws.join("tako_workspace.json").is_file());
+}
+
+#[test]
+fn job_lifecycle_conflict_cancel_duplicate_and_process_tree_cleanup() {
+    let tmp = TempDir::new("jobs");
+    let bridge = Bridge::open(tmp.path().join("data").tap_create()).unwrap();
+    let ws = create_valid_workspace(tmp.path());
+    let fx = tmp.path().join("fx.json");
+    fs::write(&fx, "{\"results\":[]}").unwrap();
+    let child_pid_file = tmp.path().join("descendant.pid");
+
+    let slow_tree_cli = write_exec(
+        tmp.path(),
+        "tako_tree",
+        &format!(
+            "#!/usr/bin/env bash\nif [ \"$1\" = \"--version\" ]; then echo 'tako 0.1.0a3'; exit 0; fi\nsleep 30 &\necho $! > \"{}\"\nwait\n",
+            child_pid_file.display()
+        ),
+    );
+
+    // Start async job
+    let started = bridge
+        .dispatch(
+            "sota_start_job",
+            json!({
+                "kind": "discovery",
+                "workspace_path": ws.to_string_lossy(),
+                "fixture_path": fx.to_string_lossy(),
+                "runtime_executable": slow_tree_cli.to_string_lossy(),
+                "timeout_ms": 10000
+            }),
+        )
+        .unwrap();
+    let job_id = started["data"]["job_id"].as_str().unwrap().to_string();
+    assert_eq!(started["execution_status"], "running");
+
+    // Wait for descendant PID file to be written
+    for _ in 0..50 {
+        if child_pid_file.is_file() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let desc_pid: i32 = fs::read_to_string(&child_pid_file).unwrap().trim().parse().unwrap();
+    assert!(pid_alive(desc_pid), "descendant should be alive before cancel");
+
+    // Conflicting job on same workspace rejected
+    let err = bridge
+        .dispatch(
+            "sota_start_job",
+            json!({
+                "kind": "ai_native",
+                "workspace_path": ws.to_string_lossy(),
+                "runtime_executable": slow_tree_cli.to_string_lossy()
+            }),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, "busy");
+
+    // Cancel active job
+    let cancelled = bridge
+        .dispatch("sota_cancel", json!({"job_id": job_id}))
+        .unwrap();
+    assert_eq!(cancelled["execution_status"], "cancelled");
+
+    // Duplicate cancellation rejected
+    let err = bridge
+        .dispatch("sota_cancel", json!({"job_id": job_id}))
+        .unwrap_err();
+    assert_eq!(err.code, "already_finished");
+
+    // Verify descendant process killed
+    for _ in 0..30 {
+        if !pid_alive(desc_pid) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(!pid_alive(desc_pid), "descendant process must be killed on cancel");
+}
+
+#[test]
+fn job_shutdown_drop_cleans_up_process_tree() {
+    let tmp = TempDir::new("drop");
+    let ws = create_valid_workspace(tmp.path());
+    let fx = tmp.path().join("fx.json");
+    fs::write(&fx, "{\"results\":[]}").unwrap();
+    let child_pid_file = tmp.path().join("drop_desc.pid");
+
+    let slow_tree_cli = write_exec(
+        tmp.path(),
+        "tako_drop_tree",
+        &format!(
+            "#!/usr/bin/env bash\nif [ \"$1\" = \"--version\" ]; then echo 'tako 0.1.0a3'; exit 0; fi\nsleep 30 &\necho $! > \"{}\"\nwait\n",
+            child_pid_file.display()
+        ),
+    );
+
+    let bridge = Bridge::open(tmp.path().join("data").tap_create()).unwrap();
+    let _started = bridge
+        .dispatch(
+            "sota_start_job",
+            json!({
+                "kind": "discovery",
+                "workspace_path": ws.to_string_lossy(),
+                "fixture_path": fx.to_string_lossy(),
+                "runtime_executable": slow_tree_cli.to_string_lossy(),
+                "timeout_ms": 10000
+            }),
+        )
+        .unwrap();
+
+    for _ in 0..50 {
+        if child_pid_file.is_file() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let desc_pid: i32 = fs::read_to_string(&child_pid_file).unwrap().trim().parse().unwrap();
+    assert!(pid_alive(desc_pid));
+
+    // Simulate application shutdown
+    drop(bridge);
+
+    for _ in 0..30 {
+        if !pid_alive(desc_pid) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(!pid_alive(desc_pid), "descendant process must be killed on Bridge drop");
+}
