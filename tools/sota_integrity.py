@@ -541,16 +541,19 @@ def make_usage_record(
     interrupted_request_count: int = 0,
     input_tokens: int | str = "UNKNOWN",
     output_tokens: int | str = "UNKNOWN",
+    total_tokens: int | str | None = None,
     provider_specific_usage: dict[str, Any] | None = None,
     wall_time_seconds: float = 0.0,
     measurement_availability: str = "UNKNOWN",
     provenance: str = "UNKNOWN",
 ) -> dict[str, Any]:
     """Create a telemetry record keeping monetary cost and provider units strictly separate."""
-    if isinstance(input_tokens, int) and isinstance(output_tokens, int):
-        total_tokens: int | str = input_tokens + output_tokens
+    if total_tokens is not None and total_tokens != "UNKNOWN":
+        resolved_total: int | str = total_tokens
+    elif isinstance(input_tokens, int) and isinstance(output_tokens, int):
+        resolved_total = input_tokens + output_tokens
     else:
-        total_tokens = "UNKNOWN"
+        resolved_total = "UNKNOWN"
     return {
         "cost_usd": cost_usd,
         "premium_requests": premium_requests,
@@ -559,7 +562,7 @@ def make_usage_record(
         "interrupted_request_count": interrupted_request_count,
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
-        "total_tokens": total_tokens,
+        "total_tokens": resolved_total,
         "provider_specific_usage": dict(provider_specific_usage or {}),
         "wall_time_seconds": round(float(wall_time_seconds), 3),
         "measurement_availability": measurement_availability,
@@ -593,7 +596,10 @@ def aggregate_usage_records(records: list[dict[str, Any]], wall_time_seconds: fl
     in_tok, in_partial = agg_int("input_tokens")
     out_tok, out_partial = agg_int("output_tokens")
     prem_req, prem_partial = agg_int("premium_requests")
-    tot_tok = (in_tok + out_tok) if (type(in_tok) is int and type(out_tok) is int) else "UNKNOWN"
+    if type(in_tok) is int and type(out_tok) is int:
+        tot_tok: int | str = in_tok + out_tok
+    else:
+        tot_tok, _ = agg_int("total_tokens")
 
     prov_specific: list[dict[str, Any]] = [r.get("provider_specific_usage") or {} for r in records if r.get("provider_specific_usage")]
     avail_vals = [str(r.get("measurement_availability") or "UNKNOWN") for r in records]
