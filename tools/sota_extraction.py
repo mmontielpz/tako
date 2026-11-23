@@ -150,6 +150,7 @@ def extract_structured_with_cli(
     provider: str,
     allow_cli_session: bool = False,
     allow_paid_api: bool = False,
+    allow_unisolated_cli: bool = False,
     fixture_payload: dict[str, Any] | None = None,
     source_artifact: str = "literature_matrix.csv",
     timeout: float = 60.0,
@@ -166,7 +167,10 @@ def extract_structured_with_cli(
         return base
 
     ok, reason = authorize_provider_execution(
-        provider, allow_cli_session=allow_cli_session, allow_paid_api=allow_paid_api
+        provider,
+        allow_cli_session=allow_cli_session,
+        allow_paid_api=allow_paid_api,
+        allow_unisolated_cli=allow_unisolated_cli,
     )
     if not ok:
         raise PermissionError(reason)

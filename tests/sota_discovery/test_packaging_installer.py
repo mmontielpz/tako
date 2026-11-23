@@ -70,7 +70,7 @@ class PackagingInstallerTests(unittest.TestCase):
             tako_bin = good_kit / ".tako-venv" / "bin" / "tako"
             ver = subprocess.run([str(tako_bin), "--version"], capture_output=True, text=True)
             self.assertEqual(ver.returncode, 0)
-            self.assertIn("0.1.0a2", ver.stdout)
+            self.assertIn("0.1.0a3", ver.stdout)
 
             # 3. Unsafe overwrite without --reinstall must fail
             res_dup = subprocess.run(["bash", str(good_kit / "install-linux.sh")], capture_output=True, text=True)

@@ -156,7 +156,7 @@ class TestM029D4ProviderNormalizationAndTelemetry(unittest.TestCase):
         )
         with mock.patch("tools.sota_extraction.shutil.which", return_value="/usr/bin/copilot"), \
              mock.patch("tools.sota_extraction.subprocess.run", return_value=mock.Mock(returncode=0, stdout=copilot_jsonl, stderr="")):
-            res = extract_structured_with_cli(rec, provider="copilot-cli", allow_cli_session=True)
+            res = extract_structured_with_cli(rec, provider="copilot-cli", allow_cli_session=True, allow_unisolated_cli=True)
             self.assertEqual(res["fields"]["architecture"], "Dual-branch CNN")
 
         codex_md = 'Here is the extraction:\n```json\n{"methodology": "Gated attention refinement"}\n```'
