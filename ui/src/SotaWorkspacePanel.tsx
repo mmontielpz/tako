@@ -16,6 +16,8 @@ export interface SotaWorkspacePanelProps {
   initialWorkspacePath?: string;
   initialTopic?: string;
   initialObjective?: string;
+  onReturnHome?: () => void;
+  onWorkspaceActive?: (info: { path: string; topic?: string; objective?: string }) => void;
 }
 
 function asRecord(v: unknown): Record<string, unknown> {
@@ -28,6 +30,8 @@ export function SotaWorkspacePanel({
   initialWorkspacePath = "",
   initialTopic = "State of the Art Survey",
   initialObjective = "Identify foundational works and evidence",
+  onReturnHome,
+  onWorkspaceActive,
 }: SotaWorkspacePanelProps) {
   const sota = useRef(pythonSotaBridge(backend)).current;
 
@@ -38,7 +42,6 @@ export function SotaWorkspacePanel({
   const [wsPath, setWsPath] = useState(initialWorkspacePath);
   const [topic, setTopic] = useState(initialTopic);
   const [objective, setObjective] = useState(initialObjective);
-  const [scope, setScope] = useState("");
   const [wsStatus, setWsStatus] = useState<SotaIpcResponse | null>(null);
 
   const [fixturePath, setFixturePath] = useState("");
@@ -50,9 +53,12 @@ export function SotaWorkspacePanel({
   const [events, setEvents] = useState<SotaWorkflowEvent[]>([]);
   const [exportFromDir, setExportFromDir] = useState("sota_ai_native_output");
   const [exportOutDir, setExportOutDir] = useState("export_out");
-  const [exportFormat, setExportFormat] = useState<"all" | "markdown" | "csv" | "json" | "bibtex" | "ris">("all");
+  const [exportFormat, setExportFormat] = useState<
+    "all" | "markdown" | "csv" | "json" | "bibtex" | "ris"
+  >("all");
   const [exportResult, setExportResult] = useState<Record<string, unknown> | null>(null);
 
+  const [mateCollapsed, setMateCollapsed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -80,8 +86,11 @@ export function SotaWorkspacePanel({
     const res = await sota.wsStatus({ workspace_path: target, runtime_executable: rtOpt });
     setWsStatus(res);
     const data = asRecord(res.data);
+    const loadedTopic = typeof data.topic === "string" ? data.topic : topic;
+    const loadedObj = typeof data.objective === "string" ? data.objective : objective;
     if (typeof data.topic === "string") setTopic(data.topic);
     if (typeof data.objective === "string") setObjective(data.objective);
+    onWorkspaceActive?.({ path: target, topic: loadedTopic, objective: loadedObj });
     try {
       const evRes = await sota.readEvents({ workspace_path: target });
       setEvents(evRes.data.events ?? []);
@@ -103,16 +112,17 @@ export function SotaWorkspacePanel({
     setBusy(true);
     setError(null);
     try {
+      const target = wsPath.trim();
       const res = await sota.wsInit({
-        workspace_path: wsPath.trim(),
+        workspace_path: target,
         topic: topic.trim(),
         objective: objective.trim(),
-        scope: scope.trim() || undefined,
         runtime_executable: rtOpt,
       });
       setWsStatus(res);
       setRuntimeInfo(res.runtime ?? runtimeInfo);
       setEvents([]);
+      onWorkspaceActive?.({ path: target, topic: topic.trim(), objective: objective.trim() });
     } catch (e) {
       setError(e instanceof BridgeError ? `${e.code}: ${e.message}` : String(e));
     } finally {
@@ -145,7 +155,7 @@ export function SotaWorkspacePanel({
       const res = await sota.startJob({
         kind,
         workspace_path: wsPath.trim(),
-        fixture_path: fixturePath.trim() || undefined,
+        fixture_path: kind === "discovery" ? fixturePath.trim() || undefined : undefined,
         provider: kind === "ai_native" ? "fixture" : undefined,
         topic: topic.trim() || undefined,
         objective: objective.trim() || undefined,
@@ -189,7 +199,7 @@ export function SotaWorkspacePanel({
           await refreshWorkspace(st.data.workspace_path);
         }
       } catch {
-        // Ignore transient poll error; next tick or manual refresh recovers.
+        // Recover on next poll or manual refresh.
       }
     }, pollMs);
     return () => {
@@ -269,9 +279,20 @@ export function SotaWorkspacePanel({
   return (
     <div class="shell" data-testid="sota-workspace-shell">
       <aside class="sidebar" aria-label="Research Workspace">
-        <h1 class="brand" data-testid="research-brand">TAKO</h1>
+        <div class="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+          <h1 class="brand" data-testid="research-brand">TAKO</h1>
+          {onReturnHome && (
+            <button
+              class="secondary"
+              data-testid="sota-return-home"
+              onClick={onReturnHome}
+            >
+              Home
+            </button>
+          )}
+        </div>
         <p class="muted" style={{ fontSize: "12px", marginTop: "-6px", marginBottom: "12px" }}>
-          ARDE · Research Environment
+          ARDE · Research
         </p>
 
         <div class="card" data-testid="sota-workspace-card">
@@ -298,7 +319,7 @@ export function SotaWorkspacePanel({
               disabled={busy || !wsPath.trim() || !topic.trim() || !objective.trim()}
               onClick={() => void initWorkspace()}
             >
-              Create workspace
+              Create
             </button>
             <button
               class="secondary"
@@ -306,13 +327,18 @@ export function SotaWorkspacePanel({
               disabled={busy || !wsPath.trim()}
               onClick={() => void openWorkspace()}
             >
-              Open workspace
+              Open
             </button>
           </div>
           {researchId && (
-            <div class="muted" data-testid="sota-ws-identity" style={{ marginTop: "8px", fontSize: "12px" }}>
-              <div>ID: <strong>{researchId}</strong></div>
-              <div>TAKO: {String(wsData.tako_version ?? "unknown")}</div>
+            <div
+              class="muted"
+              data-testid="sota-ws-identity"
+              style={{ marginTop: "8px", fontSize: "12px" }}
+            >
+              <div>
+                Project: <strong>{researchId}</strong>
+              </div>
               <div>Quality: {String(qualityStatus.verdict ?? "UNKNOWN")}</div>
             </div>
           )}
@@ -320,7 +346,7 @@ export function SotaWorkspacePanel({
 
         <details class="card" data-testid="sota-settings-disclosure">
           <summary style={{ cursor: "pointer", fontSize: "12px", fontWeight: "600" }}>
-            Settings &amp; Runtime
+            Advanced &amp; Technical Settings
           </summary>
           <div style={{ marginTop: "8px" }}>
             <label class="field">
@@ -350,6 +376,25 @@ export function SotaWorkspacePanel({
                 {runtimeError}
               </p>
             )}
+
+            <label class="field" style={{ marginTop: "8px" }}>
+              <span>Custom discovery fixture JSON (optional)</span>
+              <input
+                data-testid="sota-fixture-path"
+                value={fixturePath}
+                placeholder="/path/to/fixture.json"
+                onInput={(e) => setFixturePath((e.target as HTMLInputElement).value)}
+              />
+            </label>
+            <button
+              class="secondary"
+              data-testid="sota-run-discovery"
+              disabled={busy || !wsPath.trim() || !fixturePath.trim() || job?.status === "running"}
+              onClick={() => void startWorkflow("discovery")}
+            >
+              Run Custom Fixture Discovery
+            </button>
+
             <label class="field" style={{ marginTop: "8px" }}>
               <span>Timeout override (ms, optional)</span>
               <input
@@ -373,19 +418,53 @@ export function SotaWorkspacePanel({
                 checked={withReviewer}
                 onChange={(e) => setWithReviewer((e.target as HTMLInputElement).checked)}
               />{" "}
-              Include AI-native Reviewer (fixture)
+              Include AI-native Reviewer
             </label>
+
+            <label class="field" style={{ marginTop: "8px" }}>
+              <span>Export source / destination</span>
+              <input
+                data-testid="sota-export-from"
+                value={exportFromDir}
+                onInput={(e) => setExportFromDir((e.target as HTMLInputElement).value)}
+              />
+              <input
+                style={{ marginTop: "4px" }}
+                data-testid="sota-export-out"
+                value={exportOutDir}
+                onInput={(e) => setExportOutDir((e.target as HTMLInputElement).value)}
+              />
+            </label>
+            <select
+              data-testid="sota-export-format"
+              value={exportFormat}
+              onChange={(e) =>
+                setExportFormat((e.target as HTMLSelectElement).value as typeof exportFormat)
+              }
+            >
+              <option value="all">all</option>
+              <option value="markdown">markdown</option>
+              <option value="csv">csv</option>
+              <option value="json">json</option>
+              <option value="bibtex">bibtex</option>
+              <option value="ris">ris</option>
+            </select>
           </div>
         </details>
       </aside>
 
       <main class="main">
-        <div class="card row" role="status" data-testid="sota-offline-banner" style={{ justifyContent: "space-between", alignItems: "center" }}>
+        <div
+          class="card row"
+          role="status"
+          data-testid="sota-offline-banner"
+          style={{ justifyContent: "space-between", alignItems: "center" }}
+        >
           <span>
-            <strong>Offline Fixture Mode</strong> — Live network discovery, paid APIs, and authenticated AI CLIs are disabled.
+            <strong>Offline Demo Mode</strong> — Uses bundled offline fixture data. Live network discovery and paid AI CLIs are disabled.
           </span>
           <span class="chip" data-testid="sota-compact-runtime">
-            {runtimeInfo ? `CLI ${runtimeInfo.version}` : runtimeError ? "Runtime missing" : "Checking runtime…"}
+            {runtimeInfo ? `CLI ${runtimeInfo.version}` : runtimeError ? "Runtime needed" : "Checking…"}
           </span>
         </div>
 
@@ -396,9 +475,9 @@ export function SotaWorkspacePanel({
         )}
 
         <section class="card" data-testid="sota-config-card">
-          <h2>State of the Art Workflow</h2>
+          <h2>State of the Art</h2>
           <label class="field">
-            <span>Research topic</span>
+            <span>Research topic or question</span>
             <input
               data-testid="sota-topic"
               value={topic}
@@ -413,55 +492,29 @@ export function SotaWorkspacePanel({
               onInput={(e) => setObjective((e.target as HTMLInputElement).value)}
             />
           </label>
-          <label class="field">
-            <span>Scope (optional)</span>
-            <input
-              data-testid="sota-scope"
-              value={scope}
-              onInput={(e) => setScope((e.target as HTMLInputElement).value)}
-            />
-          </label>
-          <label class="field">
-            <span>Discovery fixture JSON path (required for Discovery)</span>
-            <input
-              data-testid="sota-fixture-path"
-              value={fixturePath}
-              placeholder="/path/to/fixture.json"
-              onInput={(e) => setFixturePath((e.target as HTMLInputElement).value)}
-            />
-          </label>
           <div class="row">
             <button
-              data-testid="sota-run-discovery"
-              disabled={busy || !wsPath.trim() || !fixturePath.trim() || job?.status === "running"}
-              onClick={() => void startWorkflow("discovery")}
-            >
-              Run Offline Discovery
-            </button>
-            <button
-              data-testid="sota-run-ai-native"
+              data-testid="sota-primary-start"
               disabled={busy || !wsPath.trim() || job?.status === "running"}
               onClick={() => void startWorkflow("ai_native")}
             >
-              Run Offline AI-Native (Fixture)
+              {job?.status === "running" ? "Running State of the Art…" : "Start State of the Art (Offline Demo)"}
             </button>
-            <button
-              class="secondary"
-              data-testid="sota-cancel-job"
-              disabled={!job || job.status !== "running"}
-              onClick={() => void cancelActiveJob()}
-            >
-              Cancel Running Job
-            </button>
+            {job?.status === "running" && (
+              <button
+                class="secondary"
+                data-testid="sota-cancel-job"
+                onClick={() => void cancelActiveJob()}
+              >
+                Cancel
+              </button>
+            )}
           </div>
         </section>
 
         {job && (
           <section class="card" data-testid="sota-job-card" role="status">
-            <h3>Execution Status: {job.status}</h3>
-            <div class="muted" style={{ fontSize: "12px" }}>
-              Job: {job.job_id} · Kind: {job.kind} · PID: {job.pid ?? "pending"} · Exit: {job.exit_code ?? "running"}
-            </div>
+            <h3>Workflow Status: {job.status}</h3>
             {job.error && (
               <p class="error" data-testid="sota-job-error">
                 {job.error.code}: {job.error.message}
@@ -474,7 +527,7 @@ export function SotaWorkspacePanel({
         )}
 
         <section class="card" data-testid="sota-results-card">
-          <h3>Scientific Results &amp; Artifacts</h3>
+          <h3>Scientific Status &amp; Artifacts</h3>
           <div class="row" style={{ marginBottom: "8px" }}>
             <span class="chip" data-testid="sota-accepted-count">
               Accepted: {acceptedCount ?? "N/A"}
@@ -505,40 +558,14 @@ export function SotaWorkspacePanel({
             </ul>
           )}
 
-          <h4>Export Artifacts</h4>
-          <div class="row">
-            <input
-              data-testid="sota-export-from"
-              value={exportFromDir}
-              placeholder="Source subdir (e.g. sota_output)"
-              onInput={(e) => setExportFromDir((e.target as HTMLInputElement).value)}
-            />
-            <input
-              data-testid="sota-export-out"
-              value={exportOutDir}
-              placeholder="Export subdir (e.g. export_out)"
-              onInput={(e) => setExportOutDir((e.target as HTMLInputElement).value)}
-            />
-            <select
-              data-testid="sota-export-format"
-              value={exportFormat}
-              onChange={(e) =>
-                setExportFormat((e.target as HTMLSelectElement).value as typeof exportFormat)
-              }
-            >
-              <option value="all">all</option>
-              <option value="markdown">markdown</option>
-              <option value="csv">csv</option>
-              <option value="json">json</option>
-              <option value="bibtex">bibtex</option>
-              <option value="ris">ris</option>
-            </select>
+          <div class="row" style={{ marginTop: "8px" }}>
             <button
+              class="secondary"
               data-testid="sota-export-btn"
-              disabled={busy || !wsPath.trim() || !exportOutDir.trim()}
+              disabled={busy || !wsPath.trim()}
               onClick={() => void runExport()}
             >
-              Export
+              Export Artifacts
             </button>
           </div>
           {exportedArtifacts.length > 0 && (
@@ -552,12 +579,16 @@ export function SotaWorkspacePanel({
           )}
         </section>
 
-        <section class="card" data-testid="sota-events-card">
-          <h3>Workflow Events ({events.length})</h3>
+        <details class="card" data-testid="sota-events-disclosure">
+          <summary style={{ cursor: "pointer", fontSize: "13px", fontWeight: "600" }}>
+            Workflow Diagnostics &amp; Events ({events.length})
+          </summary>
           {events.length === 0 ? (
-            <p class="muted">No workflow events recorded yet.</p>
+            <p class="muted" style={{ marginTop: "8px" }}>
+              No workflow events recorded yet.
+            </p>
           ) : (
-            <ul data-testid="sota-events-list">
+            <ul data-testid="sota-events-list" style={{ marginTop: "8px" }}>
               {events.map((ev, idx) => (
                 <li key={idx}>
                   [{ev.elapsed_seconds}s] <strong>{ev.event_type}</strong> ({ev.stage}: {ev.status})
@@ -566,24 +597,38 @@ export function SotaWorkspacePanel({
               ))}
             </ul>
           )}
-        </section>
+        </details>
       </main>
 
       <aside class="companion" aria-label="Research Mate" data-testid="research-mate">
-        <div class="tako-row">
-          <Tako pose={mate.pose} />
-          <div>
-            <strong>Research Mate</strong>
-            <div class="muted" style={{ fontSize: "11px" }} data-testid="research-mate-pose">
-              {mate.pose}
+        <div class="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+          <div class="tako-row">
+            <Tako pose={mate.pose} />
+            <div>
+              <strong>Research Mate</strong>
+              <div class="muted" style={{ fontSize: "11px" }} data-testid="research-mate-pose">
+                {mate.pose}
+              </div>
             </div>
           </div>
+          <button
+            class="secondary"
+            data-testid="research-mate-toggle"
+            aria-expanded={!mateCollapsed}
+            onClick={() => setMateCollapsed((c) => !c)}
+          >
+            {mateCollapsed ? "Expand" : "Collapse"}
+          </button>
         </div>
-        <h3 data-testid="research-mate-headline">{mate.headline}</h3>
-        <p data-testid="research-mate-detail">{mate.detail}</p>
-        <p class="muted" data-testid="research-mate-next">
-          <strong>Next:</strong> {mate.next}
-        </p>
+        {!mateCollapsed && (
+          <>
+            <h3 data-testid="research-mate-headline">{mate.headline}</h3>
+            <p data-testid="research-mate-detail">{mate.detail}</p>
+            <p class="muted" data-testid="research-mate-next">
+              <strong>Next:</strong> {mate.next}
+            </p>
+          </>
+        )}
       </aside>
     </div>
   );
