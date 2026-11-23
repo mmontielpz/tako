@@ -116,16 +116,16 @@ class SotaAiNativeTests(unittest.TestCase):
 
             # Copilot missing executable, timeout, nonzero exit, and invalid JSON
             with mock.patch("shutil.which", return_value=None):
-                self.assertEqual(main(["--topic", "QRC", "--objective", "T", "--provider", "copilot-cli", "--allow-paid-api", "--out-dir", tmp]), 1)
+                self.assertEqual(main(["--topic", "QRC", "--objective", "T", "--provider", "copilot-cli", "--allow-paid-api", "--allow-unisolated-cli", "--out-dir", tmp]), 1)
             with mock.patch("shutil.which", return_value="/usr/bin/copilot"):
                 with mock.patch("subprocess.run", side_effect=subprocess.TimeoutExpired("copilot", 90)):
-                    self.assertEqual(main(["--topic", "QRC", "--objective", "T", "--provider", "copilot-cli", "--allow-paid-api", "--out-dir", tmp]), 1)
+                    self.assertEqual(main(["--topic", "QRC", "--objective", "T", "--provider", "copilot-cli", "--allow-paid-api", "--allow-unisolated-cli", "--out-dir", tmp]), 1)
                 with mock.patch("subprocess.run", return_value=mock.Mock(returncode=1, stdout="", stderr="auth required")):
-                    self.assertEqual(main(["--topic", "QRC", "--objective", "T", "--provider", "copilot-cli", "--allow-paid-api", "--out-dir", tmp]), 1)
+                    self.assertEqual(main(["--topic", "QRC", "--objective", "T", "--provider", "copilot-cli", "--allow-paid-api", "--allow-unisolated-cli", "--out-dir", tmp]), 1)
                 with mock.patch("subprocess.run", return_value=mock.Mock(returncode=0, stdout="not json", stderr="")):
-                    self.assertEqual(main(["--topic", "QRC", "--objective", "T", "--provider", "copilot-cli", "--allow-paid-api", "--out-dir", tmp]), 1)
+                    self.assertEqual(main(["--topic", "QRC", "--objective", "T", "--provider", "copilot-cli", "--allow-paid-api", "--allow-unisolated-cli", "--out-dir", tmp]), 1)
                 with mock.patch("subprocess.run", return_value=mock.Mock(returncode=0, stdout="", stderr="no output")):
-                    self.assertEqual(main(["--topic", "QRC", "--objective", "T", "--provider", "copilot-cli", "--allow-paid-api", "--out-dir", tmp]), 1)
+                    self.assertEqual(main(["--topic", "QRC", "--objective", "T", "--provider", "copilot-cli", "--allow-paid-api", "--allow-unisolated-cli", "--out-dir", tmp]), 1)
 
                 # F07 regression: Copilot JSONL with leading prose + fenced JSON object
                 jsonl_out = "\n".join([
@@ -138,7 +138,7 @@ class SotaAiNativeTests(unittest.TestCase):
                     mock.Mock(returncode=0, stdout=jsonl_analyst, stderr=""),
                 ]):
                     out_jsonl = pathlib.Path(tmp) / "jsonl_ok"
-                    rc_ok = main(["--topic", "QRC", "--objective", "T", "--provider", "copilot-cli", "--allow-paid-api", "--out-dir", str(out_jsonl)])
+                    rc_ok = main(["--topic", "QRC", "--objective", "T", "--provider", "copilot-cli", "--allow-paid-api", "--allow-unisolated-cli", "--out-dir", str(out_jsonl)])
                     self.assertEqual(rc_ok, 0)
                     self.assertTrue((out_jsonl / "sota_report.md").is_file())
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tako-researcher-preview"
-version = "0.1.0a2"
+version = "0.1.0a3"
 description = "TAKO Experimental Researcher Preview CLI for State-of-the-Art (SOTA) literature discovery"
 requires-python = ">=3.9"
 dependencies = []

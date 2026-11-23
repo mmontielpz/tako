@@ -122,7 +122,7 @@ class CopilotReplayTests(unittest.TestCase):
                     mock.Mock(returncode=0, stdout=a_json, stderr=""),
                     mock.Mock(returncode=0, stdout=v_json, stderr=""),
                 ]):
-                    rc = main(["--topic", "QRC", "--objective", "T", "--provider", "copilot-cli", "--allow-paid-api", "--with-reviewer", "--out-dir", str(out_dir)])
+                    rc = main(["--topic", "QRC", "--objective", "T", "--provider", "copilot-cli", "--allow-paid-api", "--allow-unisolated-cli", "--with-reviewer", "--out-dir", str(out_dir)])
             self.assertEqual(rc, 0)
             for fname in ("stage_01_researcher.json", "stage_03_analyst.json", "stage_04_reviewer.json", "sota_report.md", "literature_matrix.csv", "references.bib", "review_report.md"):
                 self.assertTrue((out_dir / fname).is_file(), fname)
@@ -134,7 +134,7 @@ class CopilotReplayTests(unittest.TestCase):
                     mock.Mock(returncode=0, stdout=r_json, stderr=""),
                     mock.Mock(returncode=0, stdout="not json", stderr=""),
                 ]):
-                    rc2 = main(["--topic", "QRC", "--objective", "T", "--provider", "copilot-cli", "--allow-paid-api", "--out-dir", str(fail_dir)])
+                    rc2 = main(["--topic", "QRC", "--objective", "T", "--provider", "copilot-cli", "--allow-paid-api", "--allow-unisolated-cli", "--out-dir", str(fail_dir)])
             self.assertEqual(rc2, 1)
             self.assertTrue((fail_dir / "stage_01_researcher.json").is_file())
             self.assertFalse((fail_dir / "sota_report.md").exists())

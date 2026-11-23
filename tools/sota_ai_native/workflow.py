@@ -299,11 +299,15 @@ def _run_subscription_cli(
     *,
     allow_cli_session: bool = False,
     allow_paid_api: bool = False,
+    allow_unisolated_cli: bool = False,
     timeout: float = 90.0,
     strip_var: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     ok, reason = authorize_provider_execution(
-        provider, allow_cli_session=allow_cli_session, allow_paid_api=allow_paid_api
+        provider,
+        allow_cli_session=allow_cli_session,
+        allow_paid_api=allow_paid_api,
+        allow_unisolated_cli=allow_unisolated_cli,
     )
     if not ok:
         raise ProviderBlockedError(reason)
@@ -353,8 +357,8 @@ def call_claude_cli(prompt: str, allow_paid_api: bool = False, timeout: float = 
     return _run_subscription_cli("claude-cli", "claude", prompt, allow_cli_session=allow_cli_session, allow_paid_api=allow_paid_api, timeout=timeout, strip_var="ANTHROPIC_API_KEY")
 
 
-def call_copilot_cli(prompt: str, allow_paid_api: bool = False, timeout: float = 120.0, allow_cli_session: bool = False) -> tuple[str, dict[str, Any]]:
-    return _run_subscription_cli("copilot-cli", "copilot", prompt, allow_cli_session=allow_cli_session, allow_paid_api=allow_paid_api, timeout=timeout, strip_var="GH_TOKEN")
+def call_copilot_cli(prompt: str, allow_paid_api: bool = False, timeout: float = 120.0, allow_cli_session: bool = False, allow_unisolated_cli: bool = False) -> tuple[str, dict[str, Any]]:
+    return _run_subscription_cli("copilot-cli", "copilot", prompt, allow_cli_session=allow_cli_session, allow_paid_api=allow_paid_api, allow_unisolated_cli=allow_unisolated_cli, timeout=timeout, strip_var="GH_TOKEN")
 
 
 def run_role(
@@ -366,6 +370,7 @@ def run_role(
     fixture_data: dict[str, Any] | None,
     allow_cli_session: bool = False,
     budget: ProviderCallBudget | None = None,
+    allow_unisolated_cli: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     if provider == "fixture":
         assert fixture_data is not None
@@ -394,7 +399,7 @@ def run_role(
         elif provider == "claude-cli":
             raw, usage = call_claude_cli(prompt, allow_paid_api=allow_paid_api, allow_cli_session=allow_cli_session)
         elif provider == "copilot-cli":
-            raw, usage = call_copilot_cli(prompt, allow_paid_api=allow_paid_api, allow_cli_session=allow_cli_session)
+            raw, usage = call_copilot_cli(prompt, allow_paid_api=allow_paid_api, allow_cli_session=allow_cli_session, allow_unisolated_cli=allow_unisolated_cli)
         else:
             raise ProviderBlockedError(f"Unsupported provider: {provider}")
         validated = validate_role_payload(role_name, parse_provider_json(raw, provider), provider)
@@ -666,6 +671,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Authorize local authenticated AI CLI execution (may consume subscription quotas, credits, or premium requests)",
     )
     parser.add_argument("--allow-paid-api", action="store_true", help="Explicitly authorize direct metered API calls (e.g. openai-responses)")
+    parser.add_argument("--allow-unisolated-cli", action="store_true", help="Explicitly authorize excluded non-sandboxed CLIs (e.g. copilot-cli)")
     parser.add_argument("--fixture", type=pathlib.Path, default=None, help="Offline JSON fixture for --provider fixture (defaults to bundled example_fixture.json)")
     parser.add_argument("--out-dir", default=None)
     parser.add_argument("--force", action="store_true", help="Allow overwriting non-empty output directory")
@@ -764,7 +770,7 @@ def main(argv: list[str] | None = None) -> int:
             f"'Title', 'Authors' (semicolon-separated string), 'Year', 'Publication venue', 'DOI or source URL', "
             f"'Relevance rationale', 'Seminal work candidate', 'Evidence level' [one of: metadata-only, abstract-based, model-recall, NOT_VERIFIED])."
         )
-        researcher_out, u1 = run_role("researcher", researcher_prompt, args.provider, args.model, args.allow_paid_api, fixture_data, allow_cli_session=args.allow_cli_session, budget=provider_budget)
+        researcher_out, u1 = run_role("researcher", researcher_prompt, args.provider, args.model, args.allow_paid_api, fixture_data, allow_cli_session=args.allow_cli_session, budget=provider_budget, allow_unisolated_cli=args.allow_unisolated_cli)
         _save_stage_json(out_dir, "stage_01_researcher.json", {"elapsed_seconds": round(time.monotonic() - ts_r0, 3), "usage": u1, "payload": researcher_out})
 
         bib_tracker = HttpRequestTracker(max_http_requests=args.max_http_requests) if args.verify_bib else None
@@ -784,7 +790,7 @@ def main(argv: list[str] | None = None) -> int:
             f"'Evidence level' [strictly one of: metadata-only, abstract-based, full-text, model-recall, NOT_VERIFIED, UNKNOWN]). "
             f"Papers: {json.dumps(researcher_out)}. Bibliographic verification: {json.dumps(bib_checks)}."
         )
-        analyst_out, u2 = run_role("analyst", analyst_prompt, args.provider, args.model, args.allow_paid_api, fixture_data, allow_cli_session=args.allow_cli_session, budget=provider_budget)
+        analyst_out, u2 = run_role("analyst", analyst_prompt, args.provider, args.model, args.allow_paid_api, fixture_data, allow_cli_session=args.allow_cli_session, budget=provider_budget, allow_unisolated_cli=args.allow_unisolated_cli)
         _save_stage_json(out_dir, "stage_03_analyst.json", {"elapsed_seconds": round(time.monotonic() - ts_a0, 3), "usage": u2, "payload": analyst_out})
 
         reviewer_out = None
@@ -796,7 +802,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"{json.dumps(analyst_out)} (bib_checks={json.dumps(bib_checks)}). "
                 f"Return ONLY a single valid JSON object (no markdown, no prose) with keys 'challenged_claims', 'missing_foundational', 'corrections' (all lists of strings)."
             )
-            reviewer_out, u3 = run_role("reviewer", reviewer_prompt, args.provider, args.model, args.allow_paid_api, fixture_data, allow_cli_session=args.allow_cli_session, budget=provider_budget)
+            reviewer_out, u3 = run_role("reviewer", reviewer_prompt, args.provider, args.model, args.allow_paid_api, fixture_data, allow_cli_session=args.allow_cli_session, budget=provider_budget, allow_unisolated_cli=args.allow_unisolated_cli)
             _save_stage_json(out_dir, "stage_04_reviewer.json", {"elapsed_seconds": round(time.monotonic() - ts_v0, 3), "usage": u3, "payload": reviewer_out})
     except ProviderBlockedError as exc:
         err_s = sanitize_error(exc)

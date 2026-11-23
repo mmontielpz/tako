@@ -13,7 +13,7 @@
 
 TAKO is evolving from a bounded scientific CLI toolkit into an open-source, local-first **Agentic Research Development Environment (ARDE)** built for researchers, scientists, professors, and graduate students who want evidence-grounded discovery and synthesis without sacrificing scientific integrity or local ownership.
 
-> **Status:** Experimental CLI (`v0.1.0a2`). Qualified natively on **CachyOS Linux** (Python `3.14`); CI-tested on **Ubuntu 24.04 LTS** (Python `3.9`–`3.14`, native Ubuntu desktop `NOT_TESTED`) and **Windows** (Python `3.12`). Native macOS is `NOT_TESTED`. Desktop GUI (`P7`) and Research Ecosystem integrations (`P9`) are **planned**, not yet implemented.
+> **Status:** Experimental CLI Preview (`v0.1.0a3` candidate on `develop`; latest public release `v0.1.0a2`). Qualified natively on **CachyOS Linux** (Python `3.14`); CI-tested on **Ubuntu 24.04 LTS** (Python `3.9`–`3.14`, native Ubuntu desktop `NOT_TESTED`) and **Windows** (Python `3.12`). Native macOS is `NOT_TESTED`. Desktop GUI (`P7`, including human researcher UX in `M029J`) and Research Ecosystem integrations (`P9`) are **planned**, not yet implemented. `tools.evidence_auth` is source-only (excluded from the zero-dependency CLI wheel), and `copilot-cli` is excluded from the security-qualified scope by default (`PARTIAL` isolation).
 
 ---
 

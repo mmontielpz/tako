@@ -5,6 +5,21 @@ All notable changes to the public TAKO repository are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [PEP 440](https://peps.python.org/pep-0440/) / [SemVer](https://semver.org/) for releases.
 
+## [0.1.0a3] — CLI Experimental Preview (Release Candidate)
+
+### Added & Hardened
+- Explicit CLI-first AI authorization (`--allow-cli-session` vs `--allow-paid-api`), finite default `--max-provider-calls` (`2`, or `3` with `--with-reviewer`), and minimal allowlisted `sanitized_cli_env()` excluding direct API/credential env vars.
+- Unified CLI provider stdout/envelope/JSONL decoding (`tools/ai_cli_providers.py`) shared across `workflow.py` and `sota_extraction.py`, with measured `wall_time_seconds` and Codex stderr `total_tokens` telemetry.
+- Provider-native restrictions: `agy-cli` (`--sandbox`), `claude-cli` (`--tools ""`), and `codex-cli` (`--sandbox read-only --skip-git-repo-check`).
+- Fail-closed exclusion of `copilot-cli` from the security-qualified scope (`EXCLUDED_PARTIAL_ISOLATION`, requires explicit `--allow-unisolated-cli`).
+- Workflow observability events (`tools/workflow_events.py`), research workspace integration (`tools/research_workspace.py`), and bounded HTTP `429`/`503` backoff (`tools/sota_discovery/sota.py`).
+
+### Known Limitations & Scope
+- `tools.evidence_auth` (`cryptography==50.0.2`) is source-only and intentionally excluded from the zero-dependency CLI wheel.
+- Local-only rollback limitation (`3` documented expected failures in `tests/evidence_auth`).
+- Scientific discovery remains `PARTIAL_IMPROVED` (`3/9` exact discovery, `2/9` exact / `3/9` family acceptance); `FOUNDATIONAL_AND_CITATION_DISCOVERY_ENHANCEMENT` is scheduled before `M030`.
+- Human researcher GUI UX remains deferred to ARDE Desktop (`M029J`).
+
 ## [0.1.0a2] — Experimental Alpha (`RX-001` Native Linux CLI Distribution)
 
 - Added universal Linux bootstrap installer (`install.sh`), `tako update`, and `tako uninstall` (`tools/install_lifecycle.py`) with SHA-256 verification, rollback-safe venv upgrades, and Bash/Zsh/Fish support.

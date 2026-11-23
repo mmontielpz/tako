@@ -131,8 +131,8 @@ AI_CLI_SPECS: dict[str, dict[str, Any]] = {
         "interactive_supported": True,
         "non_interactive_supported": True,
         "structured_output_supported": True,
-        "live_inference_status": "NOT_TESTED",
-        "notes": "GitHub Copilot CLI (`copilot -p ... --output-format json`). May consume premium requests.",
+        "live_inference_status": "EXCLUDED_PARTIAL_ISOLATION",
+        "notes": "GitHub Copilot CLI (`copilot -p ... --output-format json`). Excluded from v0.1.0a3 security-qualified scope (PARTIAL isolation: no OS sandbox).",
     },
     "gemini-cli": {
         "id": "gemini-cli",
@@ -184,6 +184,7 @@ def authorize_provider_execution(
     *,
     allow_cli_session: bool = False,
     allow_paid_api: bool = False,
+    allow_unisolated_cli: bool = False,
 ) -> tuple[bool, str]:
     """Enforce strict separation between local CLI sessions, metered APIs, and fixtures."""
     if provider == "fixture":
@@ -201,6 +202,12 @@ def authorize_provider_execution(
                 False,
                 f"Local AI CLI '{provider}' requires explicit --allow-cli-session authorization "
                 "(local CLI execution may consume subscription quotas, premium requests, or credits).",
+            )
+        if provider == "copilot-cli" and not allow_unisolated_cli:
+            return (
+                False,
+                "Provider 'copilot-cli' is excluded from the v0.1.0a3 security-qualified scope "
+                "(PARTIAL execution isolation: no OS sandbox). Pass --allow-unisolated-cli to override.",
             )
         return True, "subscription_cli"
     return False, f"Unsupported AI provider: {provider}"
