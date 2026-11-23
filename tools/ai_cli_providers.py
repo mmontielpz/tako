@@ -73,9 +73,9 @@ PROVIDER_EXECUTION_CONTRACTS: dict[str, dict[str, Any]] = {
         "os_confinement": "provider_read_only_sandbox",
     },
     "claude-cli": {
-        "sandbox_flags": [],
+        "sandbox_flags": ["--tools", ""],
         "non_interactive_flags": ["-p", "--output-format", "json"],
-        "os_confinement": "prompt_only_unconfined_fs",
+        "os_confinement": "tools_disabled_prompt_only",
     },
     "copilot-cli": {
         "sandbox_flags": ["--no-ask-user", "--no-custom-instructions", "--disable-builtin-mcps"],
@@ -209,11 +209,11 @@ def authorize_provider_execution(
 def build_cli_invocation(provider: str, exe: str, prompt: str) -> list[str]:
     """Build non-interactive CLI invocation using verified flags for installed CLIs."""
     if provider == "agy-cli":
-        return [exe, "-p", prompt, "--output-format", "json"]
+        return [exe, "-p", prompt, "--output-format", "json", "--sandbox"]
     if provider == "codex-cli":
         return [exe, "exec", "--sandbox", "read-only", "--skip-git-repo-check", prompt]
     if provider == "claude-cli":
-        return [exe, "-p", prompt, "--output-format", "json"]
+        return [exe, "-p", prompt, "--output-format", "json", "--tools", ""]
     if provider == "copilot-cli":
         return [
             exe,
@@ -403,12 +403,20 @@ def decode_copilot_jsonl(stdout: str) -> tuple[str, dict[str, Any]]:
     return stdout, usage_meta
 
 
+def _parse_codex_stderr_tokens(stderr: str) -> int | str:
+    if not stderr:
+        return "UNKNOWN"
+    m_tok = re.search(r"tokens\s+used\s*[:\n\r]+\s*([0-9][0-9,]*)", stderr, flags=re.IGNORECASE)
+    return int(m_tok.group(1).replace(",", "")) if m_tok else "UNKNOWN"
+
+
 def decode_cli_provider_stdout(provider: str, stdout: str, stderr: str = "") -> tuple[str, dict[str, Any]]:
     """Decode CLI stdout into (assistant_text, raw_usage_meta) for all supported CLI providers."""
     if provider == "copilot-cli":
         if not stdout.strip():
             raise ProviderResponseError(f"copilot CLI returned empty stdout (stderr={stderr.strip()[:200]!r}).")
         return decode_copilot_jsonl(stdout)
+    codex_total = _parse_codex_stderr_tokens(stderr) if provider == "codex-cli" else "UNKNOWN"
     try:
         data = json.loads(stdout)
         if isinstance(data, dict):
@@ -416,24 +424,28 @@ def decode_cli_provider_stdout(provider: str, stdout: str, stderr: str = "") -> 
             text = unwrapped if unwrapped is not None else stdout
             u_raw = data.get("usage") if isinstance(data.get("usage"), dict) else {}
             cost = data.get("total_cost_usd", "UNKNOWN")
+            has_usage = bool(u_raw or isinstance(cost, (int, float)) or isinstance(codex_total, int))
             usage_meta = {
                 "cost_usd": cost if isinstance(cost, (int, float)) else "UNKNOWN",
                 "premium_requests": "UNKNOWN",
                 "input_tokens": u_raw.get("input_tokens", "UNKNOWN"),
                 "output_tokens": u_raw.get("output_tokens", "UNKNOWN"),
+                "total_tokens": codex_total,
                 "provider_specific_usage": {"http_attempts": "NOT_OBSERVABLE"},
-                "measurement_availability": "provider_reported" if (u_raw or isinstance(cost, (int, float))) else "UNKNOWN",
+                "measurement_availability": "provider_reported" if has_usage else "UNKNOWN",
                 "provenance": f"{provider}-json",
             }
             return text, usage_meta
     except json.JSONDecodeError:
         pass
+    meas_avail = "provider_reported" if isinstance(codex_total, int) else "UNKNOWN"
     return stdout, {
         "cost_usd": "UNKNOWN",
         "premium_requests": "UNKNOWN",
         "input_tokens": "UNKNOWN",
         "output_tokens": "UNKNOWN",
+        "total_tokens": codex_total,
         "provider_specific_usage": {"http_attempts": "NOT_OBSERVABLE"},
-        "measurement_availability": "UNKNOWN",
+        "measurement_availability": meas_avail,
         "provenance": f"{provider}-raw",
     }

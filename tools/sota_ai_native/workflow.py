@@ -187,6 +187,7 @@ def extract_copilot_jsonl_response(stdout: str, *, wall_time_seconds: float = 0.
         request_count=1,
         input_tokens=meta["input_tokens"],
         output_tokens=meta["output_tokens"],
+        total_tokens=meta.get("total_tokens"),
         provider_specific_usage=meta["provider_specific_usage"],
         wall_time_seconds=wall_time_seconds,
         measurement_availability=meta["measurement_availability"],
@@ -331,6 +332,7 @@ def _run_subscription_cli(
         request_count=1,
         input_tokens=meta["input_tokens"],
         output_tokens=meta["output_tokens"],
+        total_tokens=meta.get("total_tokens"),
         provider_specific_usage=meta["provider_specific_usage"],
         wall_time_seconds=elapsed_sub,
         measurement_availability=meta["measurement_availability"],
@@ -699,7 +701,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.max_provider_calls is not None and args.max_provider_calls < 0:
         print("ERROR: --max-provider-calls must be >= 0", file=sys.stderr)
         return 2
-    provider_budget = ProviderCallBudget(max_calls=args.max_provider_calls)
+    effective_provider_calls = (
+        args.max_provider_calls
+        if args.max_provider_calls is not None
+        else (None if args.provider == "fixture" else (3 if args.with_reviewer else 2))
+    )
+    provider_budget = ProviderCallBudget(max_calls=effective_provider_calls)
 
     from tools.researcher_setup import SetupConfigError, resolve_effective_discovery_settings
 
@@ -770,10 +777,11 @@ def main(argv: list[str] | None = None) -> int:
         ts_a0 = time.monotonic()
         analyst_prompt = (
             f"Role: ANALYST. Objective: {args.objective}. Analyze these papers strictly from accessible evidence, "
-            f"marking unsupported fields NOT_VERIFIED and preserving original returned fields. "
+            f"marking unsupported fields NOT_VERIFIED, never propagating experimental conditions across datasets, and preserving original returned fields. "
             f"Return ONLY a single valid JSON object (no markdown, no prose) with keys 'comparative_notes' and 'papers' "
             f"(including 'Title', 'Authors', 'Year', 'Publication venue', 'DOI or source URL', 'Relevance rationale', "
-            f"'Seminal work candidate', 'Research contribution', 'Reported results', 'Limitations', 'Evidence level'). "
+            f"'Seminal work candidate', 'Research contribution', 'Reported results', 'Limitations', "
+            f"'Evidence level' [strictly one of: metadata-only, abstract-based, full-text, model-recall, NOT_VERIFIED, UNKNOWN]). "
             f"Papers: {json.dumps(researcher_out)}. Bibliographic verification: {json.dumps(bib_checks)}."
         )
         analyst_out, u2 = run_role("analyst", analyst_prompt, args.provider, args.model, args.allow_paid_api, fixture_data, allow_cli_session=args.allow_cli_session, budget=provider_budget)
