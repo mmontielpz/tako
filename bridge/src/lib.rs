@@ -30,6 +30,7 @@ pub mod integration;
 mod onboarding;
 mod provider_connection;
 pub mod providers;
+pub mod python_sota;
 #[cfg(all(feature = "provider-auth-preview", feature = "native-qualification"))]
 compile_error!("Authentication preview cannot be combined with offline fixture mode");
 #[cfg(all(feature = "provider-auth-preview", not(debug_assertions)))]
@@ -356,6 +357,9 @@ impl Bridge {
 
     /// Single entry point used by the Tauri command and the test harness.
     pub fn dispatch(&self, cmd: &str, args: Value) -> Result<Value, BridgeError> {
+        if python_sota::handles(cmd) {
+            return python_sota::dispatch(cmd, args);
+        }
         if cmd.starts_with("research_") || research::planning::handles(cmd) {
             return research::dispatch(&self.data_dir, cmd, args);
         }

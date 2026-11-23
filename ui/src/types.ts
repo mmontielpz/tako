@@ -3,6 +3,7 @@
 import type { ResearchCommands } from "./researchBridge";
 import type { ResearchEvidenceCommands } from "./researchEvidenceBridge";
 import type { ResearchPlanningCommands } from "./researchPlanningBridge";
+import type { SotaCommands } from "./sotaBridge";
 
 export type MissionState =
   | "created" | "plan_ready" | "approved" | "executing" | "cancelled" | "sealed"
@@ -180,7 +181,7 @@ export type OnboardingState =
 export interface OnboardingWorkspaceOpened { workspace: OnboardingWorkspace; opened: true }
 
 /** Command name -> [arguments, result]. */
-export interface Commands extends ResearchCommands, ResearchEvidenceCommands, ResearchPlanningCommands {
+export interface Commands extends ResearchCommands, ResearchEvidenceCommands, ResearchPlanningCommands, SotaCommands {
   onboarding_state: [undefined, OnboardingState];
   onboarding_open_workspace: [{ workspace: OnboardingWorkspace }, OnboardingWorkspaceOpened];
   onboarding_complete: [{ workspace: OnboardingWorkspace }, OnboardingCompleted];
