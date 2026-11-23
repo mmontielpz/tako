@@ -309,8 +309,12 @@ def fetch_openalex(
     tracker: HttpRequestTracker | None = None,
     max_retries: int = 0,
     category: str = "search",
+    sort: str | None = None,
 ) -> list[dict[str, Any]]:
-    params = urllib.parse.urlencode({"search": query, "per-page": str(per_page)})
+    q_params: dict[str, str] = {"search": query, "per-page": str(per_page)}
+    if sort:
+        q_params["sort"] = sort
+    params = urllib.parse.urlencode(q_params)
     url = f"{OPENALEX_WORKS_URL}?{params}"
     if tracker is not None:
         payload = tracker.get_json(url, timeout=timeout, category=category, max_retries=max_retries)
@@ -826,8 +830,12 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"ERROR: {exc}", file=sys.stderr)
                     return 2
 
-                def _multi_search(q: str, n: int) -> list[dict[str, Any]]:
+                def _multi_search(q: str, n: int, *, sort: str | None = None) -> list[dict[str, Any]]:
                     assert tracker is not None
+                    if sort and "openalex" in [p.provider_id for p in providers]:
+                        # Citation-weighted foundational retrieval via OpenAlex while preserving multi-source search
+                        hits = fetch_openalex(q, per_page=n, tracker=tracker, sort=sort)
+                        return hits
                     hits, errs = run_multi_source_search(q, n, providers, tracker=tracker)
                     multi_errors.extend(errs)
                     if not hits and errs:
