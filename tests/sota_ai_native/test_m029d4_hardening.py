@@ -192,12 +192,12 @@ class TestM029D4ScientificIntegrityAndRateLimit(unittest.TestCase):
         }
         out = extract_structured_deterministic(rec)
         self.assertEqual(out["evidence_type"], "ABSTRACT_BASED")
-        self.assertIn("training_details", out["missing_information"])
-        self.assertEqual(out["fields"]["training_details"], "NOT_AVAILABLE")
+        self.assertIn("methodology", out["missing_information"])
+        self.assertEqual(out["fields"]["methodology"], "NOT_AVAILABLE")
 
     def test_http_429_and_503_bounded_backoff_counts_toward_budget(self) -> None:
         sleeps: list[float] = []
-        tracker = HttpRequestTracker(max_http_requests=5, min_interval_seconds=0.0, sleep_fn=sleeps.append)
+        tracker = HttpRequestTracker(max_http_requests=5, provider_min_intervals={"openalex": 0.0}, sleep_fn=sleeps.append)
         calls = {"n": 0}
 
         class _FakeResp:
@@ -223,7 +223,8 @@ class TestM029D4ScientificIntegrityAndRateLimit(unittest.TestCase):
                 return _FakeResp(503)
             return _FakeResp(200)
 
-        res = tracker.get_json("https://api.openalex.org/works", max_retries=2, open_fn=fake_open, provider="openalex")
+        with mock.patch("tools.sota_discovery.sota.urllib.request.urlopen", side_effect=fake_open):
+            res = tracker.get_json("https://api.openalex.org/works", max_retries=2, provider="openalex")
         self.assertEqual(res, {"ok": True})
         self.assertEqual(tracker.http_attempts, 3)
         self.assertEqual(tracker.rate_limited_responses, 1)

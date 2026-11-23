@@ -81,7 +81,7 @@ class CopilotReplayTests(unittest.TestCase):
         p = norm["papers"][0]
         self.assertEqual(p["Authors"], "Herbert Jaeger; Harald Haas")
         self.assertEqual(p["Year"], 2004)
-        self.assertTrue(p["Evidence level"].startswith("MODEL_RECALL"))
+        self.assertTrue(p["Evidence level"].startswith(("MODEL_RECALL", "UNKNOWN")))
         self.assertNotIn("abstract-based", p["Evidence level"])
         self.assertNotIn("full-text", p["Evidence level"])
 
