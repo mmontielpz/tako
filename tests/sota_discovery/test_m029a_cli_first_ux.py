@@ -52,7 +52,7 @@ class M029ACliFirstUxTests(unittest.TestCase):
 
     def test_invocation_contracts_redaction_and_subprocess_failure_handling(self):
         self.assertEqual(build_cli_invocation("agy-cli", "/bin/agy", "hi"), ["/bin/agy", "-p", "hi", "--output-format", "json"])
-        self.assertEqual(build_cli_invocation("codex-cli", "/bin/codex", "hi"), ["/bin/codex", "exec", "hi"])
+        self.assertEqual(build_cli_invocation("codex-cli", "/bin/codex", "hi"), ["/bin/codex", "exec", "--sandbox", "read-only", "--skip-git-repo-check", "hi"])
         self.assertEqual(build_cli_invocation("claude-cli", "/bin/claude", "hi"), ["/bin/claude", "-p", "hi", "--output-format", "json"])
 
         with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "sk-secret", "ANTHROPIC_API_KEY": "ant-secret", "GH_TOKEN": "gh-secret"}):

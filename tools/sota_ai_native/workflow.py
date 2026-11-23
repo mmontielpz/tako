@@ -18,8 +18,14 @@ import urllib.request
 from typing import Any
 
 from tools.ai_cli_providers import (
+    BudgetExhaustedError,
+    ProviderCallBudget,
+    ProviderResponseError,
     authorize_provider_execution,
     build_cli_invocation,
+    decode_cli_provider_stdout,
+    decode_copilot_jsonl,
+    parse_structured_json_response,
     sanitized_cli_env,
 )
 from tools.sota_discovery.sota import HttpBudgetExhaustedError, HttpRequestTracker, fetch_openalex
@@ -99,41 +105,10 @@ def call_openai_responses_web_search(
 
 
 def parse_provider_json(raw: str, provider: str) -> dict[str, Any]:
-    text = raw.strip()
-    if not text:
-        raise ProviderBlockedError(f"{provider} returned an empty response (0 bytes after stripping).")
-
-    candidates: list[str] = [text]
-    for fence_match in re.finditer(r"```(?:json)?\s*\n(.*?)```", text, flags=re.DOTALL | re.IGNORECASE):
-        candidates.append(fence_match.group(1).strip())
-
-    decoder = json.JSONDecoder()
-    for cand in candidates:
-        try:
-            parsed = json.loads(cand)
-            if isinstance(parsed, dict):
-                return parsed
-        except json.JSONDecodeError:
-            pass
-        found: list[dict[str, Any]] = []
-        idx = cand.find("{")
-        while idx != -1:
-            try:
-                parsed, end_idx = decoder.raw_decode(cand, idx)
-                if isinstance(parsed, dict):
-                    found.append(parsed)
-                    idx = cand.find("{", end_idx)
-                    continue
-            except json.JSONDecodeError:
-                pass
-            idx = cand.find("{", idx + 1)
-        if len(found) > 1:
-            raise ProviderBlockedError(f"{provider} returned multiple competing JSON objects ({len(found)}).")
-        if len(found) == 1:
-            return found[0]
-
-    preview = text[:160].replace("\n", " ")
-    raise ProviderBlockedError(f"{provider} returned invalid JSON (no JSON object found; preview={preview!r}).")
+    try:
+        return parse_structured_json_response(raw, provider)
+    except ProviderResponseError as exc:
+        raise ProviderBlockedError(str(exc)) from exc
 
 
 VALID_EVIDENCE_LEVELS = {
@@ -147,14 +122,10 @@ VALID_EVIDENCE_LEVELS = {
 }
 
 
-def normalize_evidence_level(raw_level: Any, provider: str) -> str:
+def normalize_evidence_level(raw_level: Any, provider: str, *, has_verified_source_text: bool = False) -> str:
+    """Normalize evidence level uniformly by provenance rather than provider identity."""
     label = str(raw_level or "").strip()
     low = label.lower()
-    if provider == "copilot-cli":
-        # Copilot CLI recall outputs lack retrieved abstract/full-text provenance in TAKO.
-        if low in ("", "model-recall", "model_recall"):
-            return "MODEL_RECALL"
-        return f"MODEL_RECALL (clamped_from={label!r})"
     if low in VALID_EVIDENCE_LEVELS:
         if low == "not_verified":
             return "NOT_VERIFIED"
@@ -162,7 +133,7 @@ def normalize_evidence_level(raw_level: Any, provider: str) -> str:
             return "UNKNOWN"
         if low in ("model-recall", "model_recall"):
             return "MODEL_RECALL"
-        if low in ("abstract-based", "full-text") and provider != "fixture":
+        if low in ("abstract-based", "full-text") and provider != "fixture" and not has_verified_source_text:
             # Without verified retrieved text correspondence, do not promote recall to abstract/full-text.
             return f"MODEL_RECALL (unbacked_claim={label!r})"
         return low
@@ -204,95 +175,32 @@ def validate_role_payload(role_name: str, payload: dict[str, Any], provider: str
     return payload
 
 
-def extract_copilot_jsonl_response(stdout: str) -> tuple[str, dict[str, Any]]:
+def extract_copilot_jsonl_response(stdout: str, *, wall_time_seconds: float = 0.0) -> tuple[str, dict[str, Any]]:
     """Extract assistant text and usage metadata from Copilot CLI --output-format json (JSONL)."""
-    input_tokens: int | str = "UNKNOWN"
-    output_tokens: int | str = "UNKNOWN"
-    premium_requests: int | str = "UNKNOWN"
-    cost_usd: float | str = "UNKNOWN"
-    provider_specific: dict[str, Any] = {}
-    messages: list[str] = []
-    final_answers: list[str] = []
-    event_types: list[str] = []
-    parsed_any_jsonl = False
-
-    for line in stdout.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(obj, dict):
-            continue
-        parsed_any_jsonl = True
-        ev_type = str(obj.get("type") or "")
-        if ev_type:
-            event_types.append(ev_type)
-        data = obj.get("data") if isinstance(obj.get("data"), dict) else obj
-
-        if ev_type in ("assistant.message", "message") or (
-            isinstance(data, dict) and isinstance(data.get("content"), str) and ev_type not in ("user.message", "tool.execution_start", "tool.execution_complete")
-        ):
-            content = data.get("content")
-            if isinstance(content, str) and content.strip():
-                messages.append(content)
-                if isinstance(data, dict) and data.get("phase") == "final_answer":
-                    final_answers.append(content)
-        elif isinstance(obj.get("result"), str) and obj["result"].strip():
-            messages.append(obj["result"])
-
-        if isinstance(obj.get("usage"), dict):
-            u = obj["usage"]
-            input_tokens = u.get("input_tokens", u.get("inputTokens", input_tokens))
-            output_tokens = u.get("output_tokens", u.get("outputTokens", output_tokens))
-            if "premiumRequests" in u:
-                premium_requests = u["premiumRequests"]
-        if "total_cost_usd" in obj and isinstance(obj["total_cost_usd"], (int, float)):
-            cost_usd = obj["total_cost_usd"]
-        if isinstance(data, dict) and "ai_credits" in data:
-            provider_specific["ai_credits"] = data["ai_credits"]
-        if isinstance(data, dict) and "totalPremiumRequests" in data and premium_requests == "UNKNOWN":
-            premium_requests = data["totalPremiumRequests"]
-
+    try:
+        text, meta = decode_copilot_jsonl(stdout)
+    except ProviderResponseError as exc:
+        raise ProviderBlockedError(str(exc)) from exc
     usage = make_usage_record(
-        cost_usd=cost_usd,
-        premium_requests=premium_requests,
+        cost_usd=meta["cost_usd"],
+        premium_requests=meta["premium_requests"],
         request_count=1,
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        provider_specific_usage=provider_specific,
-        measurement_availability="provider_reported" if (premium_requests != "UNKNOWN" or input_tokens != "UNKNOWN") else "UNKNOWN",
-        provenance="copilot-cli-jsonl",
+        input_tokens=meta["input_tokens"],
+        output_tokens=meta["output_tokens"],
+        provider_specific_usage=meta["provider_specific_usage"],
+        wall_time_seconds=wall_time_seconds,
+        measurement_availability=meta["measurement_availability"],
+        provenance=meta["provenance"],
     )
-
-    candidates = final_answers if final_answers else messages
-    if candidates:
-        for msg in reversed(candidates):
-            try:
-                parse_provider_json(msg, "copilot-cli")
-                return msg, usage
-            except ProviderBlockedError:
-                continue
-        return candidates[-1], usage
-    if parsed_any_jsonl:
-        raise ProviderBlockedError(
-            f"copilot-cli JSONL stream contained no assistant message (events={event_types[:10]})."
-        )
-    return stdout, usage
+    return text, usage
 
 
 MAX_PROVIDER_OUTPUT_BYTES = 2 * 1024 * 1024
 
 
 def _sanitized_provider_env(allow_key_env: str | None = None) -> dict[str, str]:
-    """Build a minimal environment for CLI subprocesses without leaking unrelated credentials."""
-    keep = ("PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TERM", "TMPDIR", "SYSTEMROOT", "COMSPEC")
-    env = {k: os.environ[k] for k in keep if k in os.environ}
-    if allow_key_env and allow_key_env in os.environ:
-        env[allow_key_env] = os.environ[allow_key_env]
-    return env
+    """Delegate to shared minimal allowlisted environment builder."""
+    return sanitized_cli_env(allow_key_env=allow_key_env)
 
 
 def _run_bounded_subprocess(
@@ -402,37 +310,32 @@ def _run_subscription_cli(
     if not exe:
         raise ProviderBlockedError(f"{exe_name} CLI is not installed on PATH.")
     cmd = build_cli_invocation(provider, exe, prompt)
+    t_sub = time.monotonic()
     rc, stdout, stderr = _run_bounded_subprocess(
         cmd,
         env=sanitized_cli_env(strip_var),
         timeout=timeout,
         provider_label=f"{exe_name} CLI",
     )
+    elapsed_sub = round(time.monotonic() - t_sub, 3)
     if rc != 0:
         err_preview = stderr.strip()[:200] or stdout.strip()[:200]
         raise ProviderBlockedError(f"{exe_name} CLI failed (exit {rc}): {err_preview}")
-    if provider == "copilot-cli":
-        if not stdout.strip():
-            raise ProviderBlockedError(f"copilot CLI returned empty stdout (stderr={stderr.strip()[:200]!r}).")
-        return extract_copilot_jsonl_response(stdout)
     try:
-        data = json.loads(stdout)
-        text = data.get("result") or stdout
-        u_raw = data.get("usage") or {}
-        cost = data.get("total_cost_usd", "UNKNOWN")
-        usage = make_usage_record(
-            cost_usd=cost if isinstance(cost, (int, float)) else "UNKNOWN",
-            premium_requests="UNKNOWN",
-            request_count=1,
-            input_tokens=u_raw.get("input_tokens", "UNKNOWN"),
-            output_tokens=u_raw.get("output_tokens", "UNKNOWN"),
-            provider_specific_usage={"http_attempts": "NOT_OBSERVABLE"},
-            measurement_availability="provider_reported" if (u_raw or isinstance(cost, (int, float))) else "UNKNOWN",
-            provenance=f"{provider}-json",
-        )
-    except json.JSONDecodeError:
-        text = stdout
-        usage = make_usage_record(request_count=1, provider_specific_usage={"http_attempts": "NOT_OBSERVABLE"}, provenance=f"{provider}-raw")
+        text, meta = decode_cli_provider_stdout(provider, stdout, stderr)
+    except ProviderResponseError as exc:
+        raise ProviderBlockedError(str(exc)) from exc
+    usage = make_usage_record(
+        cost_usd=meta["cost_usd"],
+        premium_requests=meta["premium_requests"],
+        request_count=1,
+        input_tokens=meta["input_tokens"],
+        output_tokens=meta["output_tokens"],
+        provider_specific_usage=meta["provider_specific_usage"],
+        wall_time_seconds=elapsed_sub,
+        measurement_availability=meta["measurement_availability"],
+        provenance=meta["provenance"],
+    )
     return text, usage
 
 
@@ -460,6 +363,7 @@ def run_role(
     allow_paid_api: bool,
     fixture_data: dict[str, Any] | None,
     allow_cli_session: bool = False,
+    budget: ProviderCallBudget | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     if provider == "fixture":
         assert fixture_data is not None
@@ -473,22 +377,32 @@ def run_role(
             measurement_availability="fixture_zero",
             provenance="offline_fixture",
         )
-    if provider == "openai-responses":
-        raw, usage = call_openai_responses_web_search(prompt, model=model, allow_paid_api=allow_paid_api)
-        return validate_role_payload(role_name, parse_provider_json(raw, provider), provider), usage
-    if provider == "agy-cli":
-        raw, usage = call_agy_cli(prompt, allow_cli_session=allow_cli_session, allow_paid_api=allow_paid_api)
-        return validate_role_payload(role_name, parse_provider_json(raw, provider), provider), usage
-    if provider == "codex-cli":
-        raw, usage = call_codex_cli(prompt, allow_cli_session=allow_cli_session, allow_paid_api=allow_paid_api)
-        return validate_role_payload(role_name, parse_provider_json(raw, provider), provider), usage
-    if provider == "claude-cli":
-        raw, usage = call_claude_cli(prompt, allow_paid_api=allow_paid_api, allow_cli_session=allow_cli_session)
-        return validate_role_payload(role_name, parse_provider_json(raw, provider), provider), usage
-    if provider == "copilot-cli":
-        raw, usage = call_copilot_cli(prompt, allow_paid_api=allow_paid_api, allow_cli_session=allow_cli_session)
-        return validate_role_payload(role_name, parse_provider_json(raw, provider), provider), usage
-    raise ProviderBlockedError(f"Unsupported provider: {provider}")
+    if budget is not None:
+        try:
+            budget.consume(role_name.lower())
+        except BudgetExhaustedError as exc:
+            raise ProviderBlockedError(str(exc)) from exc
+    try:
+        if provider == "openai-responses":
+            raw, usage = call_openai_responses_web_search(prompt, model=model, allow_paid_api=allow_paid_api)
+        elif provider == "agy-cli":
+            raw, usage = call_agy_cli(prompt, allow_cli_session=allow_cli_session, allow_paid_api=allow_paid_api)
+        elif provider == "codex-cli":
+            raw, usage = call_codex_cli(prompt, allow_cli_session=allow_cli_session, allow_paid_api=allow_paid_api)
+        elif provider == "claude-cli":
+            raw, usage = call_claude_cli(prompt, allow_paid_api=allow_paid_api, allow_cli_session=allow_cli_session)
+        elif provider == "copilot-cli":
+            raw, usage = call_copilot_cli(prompt, allow_paid_api=allow_paid_api, allow_cli_session=allow_cli_session)
+        else:
+            raise ProviderBlockedError(f"Unsupported provider: {provider}")
+        validated = validate_role_payload(role_name, parse_provider_json(raw, provider), provider)
+    except Exception:
+        if budget is not None:
+            budget.record_failure()
+        raise
+    if budget is not None:
+        budget.record_success()
+    return validated, usage
 
 
 def _fetch_openalex_by_doi(
@@ -739,6 +653,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Maximum observable HTTP attempts for --verify-bib (OpenAlex); does not bound black-box provider CLI network activity",
     )
     parser.add_argument(
+        "--max-provider-calls",
+        type=int,
+        default=None,
+        help="Maximum provider subprocess invocations across workflow stages (0 blocks all live provider calls; does not cap internal model turns)",
+    )
+    parser.add_argument(
         "--allow-cli-session",
         action="store_true",
         help="Authorize local authenticated AI CLI execution (may consume subscription quotas, credits, or premium requests)",
@@ -776,6 +696,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.max_http_requests is not None and args.max_http_requests < 1:
         print("ERROR: --max-http-requests must be >= 1", file=sys.stderr)
         return 2
+    if args.max_provider_calls is not None and args.max_provider_calls < 0:
+        print("ERROR: --max-provider-calls must be >= 0", file=sys.stderr)
+        return 2
+    provider_budget = ProviderCallBudget(max_calls=args.max_provider_calls)
 
     from tools.researcher_setup import SetupConfigError, resolve_effective_discovery_settings
 
@@ -833,7 +757,7 @@ def main(argv: list[str] | None = None) -> int:
             f"'Title', 'Authors' (semicolon-separated string), 'Year', 'Publication venue', 'DOI or source URL', "
             f"'Relevance rationale', 'Seminal work candidate', 'Evidence level' [one of: metadata-only, abstract-based, model-recall, NOT_VERIFIED])."
         )
-        researcher_out, u1 = run_role("researcher", researcher_prompt, args.provider, args.model, args.allow_paid_api, fixture_data, allow_cli_session=args.allow_cli_session)
+        researcher_out, u1 = run_role("researcher", researcher_prompt, args.provider, args.model, args.allow_paid_api, fixture_data, allow_cli_session=args.allow_cli_session, budget=provider_budget)
         _save_stage_json(out_dir, "stage_01_researcher.json", {"elapsed_seconds": round(time.monotonic() - ts_r0, 3), "usage": u1, "payload": researcher_out})
 
         bib_tracker = HttpRequestTracker(max_http_requests=args.max_http_requests) if args.verify_bib else None
@@ -852,7 +776,7 @@ def main(argv: list[str] | None = None) -> int:
             f"'Seminal work candidate', 'Research contribution', 'Reported results', 'Limitations', 'Evidence level'). "
             f"Papers: {json.dumps(researcher_out)}. Bibliographic verification: {json.dumps(bib_checks)}."
         )
-        analyst_out, u2 = run_role("analyst", analyst_prompt, args.provider, args.model, args.allow_paid_api, fixture_data, allow_cli_session=args.allow_cli_session)
+        analyst_out, u2 = run_role("analyst", analyst_prompt, args.provider, args.model, args.allow_paid_api, fixture_data, allow_cli_session=args.allow_cli_session, budget=provider_budget)
         _save_stage_json(out_dir, "stage_03_analyst.json", {"elapsed_seconds": round(time.monotonic() - ts_a0, 3), "usage": u2, "payload": analyst_out})
 
         reviewer_out = None
@@ -864,7 +788,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"{json.dumps(analyst_out)} (bib_checks={json.dumps(bib_checks)}). "
                 f"Return ONLY a single valid JSON object (no markdown, no prose) with keys 'challenged_claims', 'missing_foundational', 'corrections' (all lists of strings)."
             )
-            reviewer_out, u3 = run_role("reviewer", reviewer_prompt, args.provider, args.model, args.allow_paid_api, fixture_data, allow_cli_session=args.allow_cli_session)
+            reviewer_out, u3 = run_role("reviewer", reviewer_prompt, args.provider, args.model, args.allow_paid_api, fixture_data, allow_cli_session=args.allow_cli_session, budget=provider_budget)
             _save_stage_json(out_dir, "stage_04_reviewer.json", {"elapsed_seconds": round(time.monotonic() - ts_v0, 3), "usage": u3, "payload": reviewer_out})
     except ProviderBlockedError as exc:
         err_s = sanitize_error(exc)
@@ -900,7 +824,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.workspace is not None:
         register_workflow_stage(args.workspace, "discovery", status="COMPLETED", run_id=run_id, out_dir=out_dir, outputs=outputs, summary={"provider": args.provider, "reviewer": args.with_reviewer})
     if args.json:
-        print(json.dumps({"status": "AI_NATIVE_COMPLETE", "run_id": run_id, "provider": args.provider, "reviewer": args.with_reviewer, "elapsed_seconds": round(elapsed, 3), "outputs": out_strs}, indent=2, ensure_ascii=False))
+        print(json.dumps({"status": "AI_NATIVE_COMPLETE", "run_id": run_id, "provider": args.provider, "reviewer": args.with_reviewer, "elapsed_seconds": round(elapsed, 3), "provider_call_budget": provider_budget.summary(), "outputs": out_strs}, indent=2, ensure_ascii=False))
         return 0
     print(f"AI_NATIVE_COMPLETE provider={args.provider} reviewer={args.with_reviewer} outputs={out_strs}")
     return 0

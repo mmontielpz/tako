@@ -9,8 +9,11 @@ import subprocess
 from typing import Any
 
 from tools.ai_cli_providers import (
+    ProviderCallBudget,
     authorize_provider_execution,
     build_cli_invocation,
+    decode_cli_provider_stdout,
+    parse_structured_json_response,
     sanitized_cli_env,
 )
 
@@ -150,6 +153,7 @@ def extract_structured_with_cli(
     fixture_payload: dict[str, Any] | None = None,
     source_artifact: str = "literature_matrix.csv",
     timeout: float = 60.0,
+    budget: ProviderCallBudget | None = None,
 ) -> dict[str, Any]:
     """Optional CLI-first AI extraction using M029A authorization boundary."""
     base = extract_structured_deterministic(record, source_artifact=source_artifact)
@@ -183,14 +187,22 @@ def extract_structured_with_cli(
         + ". Use 'NOT_AVAILABLE' for any unstated field. Text:\n"
         + text_input[:3000]
     )
-    cmd = build_cli_invocation(provider, exe, prompt)
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=sanitized_cli_env())
-    if proc.returncode != 0:
-        raise RuntimeError(f"{provider} failed (exit {proc.returncode}): {proc.stderr.strip()[:200]}")
+    if budget is not None:
+        budget.consume("extraction")
 
-    parsed = json.loads(proc.stdout)
-    if isinstance(parsed, dict) and "result" in parsed and isinstance(parsed["result"], str):
-        parsed = json.loads(parsed["result"])
+    cmd = build_cli_invocation(provider, exe, prompt)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=sanitized_cli_env())
+        if proc.returncode != 0:
+            raise RuntimeError(f"{provider} failed (exit {proc.returncode}): {proc.stderr.strip()[:200]}")
+        assistant_text, _ = decode_cli_provider_stdout(provider, proc.stdout, proc.stderr)
+        parsed = parse_structured_json_response(assistant_text, provider)
+    except Exception:
+        if budget is not None:
+            budget.record_failure()
+        raise
+    if budget is not None:
+        budget.record_success()
     if isinstance(parsed, dict):
         for k in STRUCTURED_FIELDS:
             if k in parsed and str(parsed[k]).strip():
