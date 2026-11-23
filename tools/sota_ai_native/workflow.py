@@ -17,6 +17,17 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from tools.ai_cli_providers import (
+    BudgetExhaustedError,
+    ProviderCallBudget,
+    ProviderResponseError,
+    authorize_provider_execution,
+    build_cli_invocation,
+    decode_cli_provider_stdout,
+    decode_copilot_jsonl,
+    parse_structured_json_response,
+    sanitized_cli_env,
+)
 from tools.sota_discovery.sota import HttpBudgetExhaustedError, HttpRequestTracker, fetch_openalex
 from tools.sota_integrity import (
     aggregate_usage_records,
@@ -94,41 +105,10 @@ def call_openai_responses_web_search(
 
 
 def parse_provider_json(raw: str, provider: str) -> dict[str, Any]:
-    text = raw.strip()
-    if not text:
-        raise ProviderBlockedError(f"{provider} returned an empty response (0 bytes after stripping).")
-
-    candidates: list[str] = [text]
-    for fence_match in re.finditer(r"```(?:json)?\s*\n(.*?)```", text, flags=re.DOTALL | re.IGNORECASE):
-        candidates.append(fence_match.group(1).strip())
-
-    decoder = json.JSONDecoder()
-    for cand in candidates:
-        try:
-            parsed = json.loads(cand)
-            if isinstance(parsed, dict):
-                return parsed
-        except json.JSONDecodeError:
-            pass
-        found: list[dict[str, Any]] = []
-        idx = cand.find("{")
-        while idx != -1:
-            try:
-                parsed, end_idx = decoder.raw_decode(cand, idx)
-                if isinstance(parsed, dict):
-                    found.append(parsed)
-                    idx = cand.find("{", end_idx)
-                    continue
-            except json.JSONDecodeError:
-                pass
-            idx = cand.find("{", idx + 1)
-        if len(found) > 1:
-            raise ProviderBlockedError(f"{provider} returned multiple competing JSON objects ({len(found)}).")
-        if len(found) == 1:
-            return found[0]
-
-    preview = text[:160].replace("\n", " ")
-    raise ProviderBlockedError(f"{provider} returned invalid JSON (no JSON object found; preview={preview!r}).")
+    try:
+        return parse_structured_json_response(raw, provider)
+    except ProviderResponseError as exc:
+        raise ProviderBlockedError(str(exc)) from exc
 
 
 VALID_EVIDENCE_LEVELS = {
@@ -142,14 +122,10 @@ VALID_EVIDENCE_LEVELS = {
 }
 
 
-def normalize_evidence_level(raw_level: Any, provider: str) -> str:
+def normalize_evidence_level(raw_level: Any, provider: str, *, has_verified_source_text: bool = False) -> str:
+    """Normalize evidence level uniformly by provenance rather than provider identity."""
     label = str(raw_level or "").strip()
     low = label.lower()
-    if provider == "copilot-cli":
-        # Copilot CLI recall outputs lack retrieved abstract/full-text provenance in TAKO.
-        if low in ("", "model-recall", "model_recall"):
-            return "MODEL_RECALL"
-        return f"MODEL_RECALL (clamped_from={label!r})"
     if low in VALID_EVIDENCE_LEVELS:
         if low == "not_verified":
             return "NOT_VERIFIED"
@@ -157,7 +133,7 @@ def normalize_evidence_level(raw_level: Any, provider: str) -> str:
             return "UNKNOWN"
         if low in ("model-recall", "model_recall"):
             return "MODEL_RECALL"
-        if low in ("abstract-based", "full-text") and provider != "fixture":
+        if low in ("abstract-based", "full-text") and provider != "fixture" and not has_verified_source_text:
             # Without verified retrieved text correspondence, do not promote recall to abstract/full-text.
             return f"MODEL_RECALL (unbacked_claim={label!r})"
         return low
@@ -199,95 +175,33 @@ def validate_role_payload(role_name: str, payload: dict[str, Any], provider: str
     return payload
 
 
-def extract_copilot_jsonl_response(stdout: str) -> tuple[str, dict[str, Any]]:
+def extract_copilot_jsonl_response(stdout: str, *, wall_time_seconds: float = 0.0) -> tuple[str, dict[str, Any]]:
     """Extract assistant text and usage metadata from Copilot CLI --output-format json (JSONL)."""
-    input_tokens: int | str = "UNKNOWN"
-    output_tokens: int | str = "UNKNOWN"
-    premium_requests: int | str = "UNKNOWN"
-    cost_usd: float | str = "UNKNOWN"
-    provider_specific: dict[str, Any] = {}
-    messages: list[str] = []
-    final_answers: list[str] = []
-    event_types: list[str] = []
-    parsed_any_jsonl = False
-
-    for line in stdout.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(obj, dict):
-            continue
-        parsed_any_jsonl = True
-        ev_type = str(obj.get("type") or "")
-        if ev_type:
-            event_types.append(ev_type)
-        data = obj.get("data") if isinstance(obj.get("data"), dict) else obj
-
-        if ev_type in ("assistant.message", "message") or (
-            isinstance(data, dict) and isinstance(data.get("content"), str) and ev_type not in ("user.message", "tool.execution_start", "tool.execution_complete")
-        ):
-            content = data.get("content")
-            if isinstance(content, str) and content.strip():
-                messages.append(content)
-                if isinstance(data, dict) and data.get("phase") == "final_answer":
-                    final_answers.append(content)
-        elif isinstance(obj.get("result"), str) and obj["result"].strip():
-            messages.append(obj["result"])
-
-        if isinstance(obj.get("usage"), dict):
-            u = obj["usage"]
-            input_tokens = u.get("input_tokens", u.get("inputTokens", input_tokens))
-            output_tokens = u.get("output_tokens", u.get("outputTokens", output_tokens))
-            if "premiumRequests" in u:
-                premium_requests = u["premiumRequests"]
-        if "total_cost_usd" in obj and isinstance(obj["total_cost_usd"], (int, float)):
-            cost_usd = obj["total_cost_usd"]
-        if isinstance(data, dict) and "ai_credits" in data:
-            provider_specific["ai_credits"] = data["ai_credits"]
-        if isinstance(data, dict) and "totalPremiumRequests" in data and premium_requests == "UNKNOWN":
-            premium_requests = data["totalPremiumRequests"]
-
+    try:
+        text, meta = decode_copilot_jsonl(stdout)
+    except ProviderResponseError as exc:
+        raise ProviderBlockedError(str(exc)) from exc
     usage = make_usage_record(
-        cost_usd=cost_usd,
-        premium_requests=premium_requests,
+        cost_usd=meta["cost_usd"],
+        premium_requests=meta["premium_requests"],
         request_count=1,
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        provider_specific_usage=provider_specific,
-        measurement_availability="provider_reported" if (premium_requests != "UNKNOWN" or input_tokens != "UNKNOWN") else "UNKNOWN",
-        provenance="copilot-cli-jsonl",
+        input_tokens=meta["input_tokens"],
+        output_tokens=meta["output_tokens"],
+        total_tokens=meta.get("total_tokens"),
+        provider_specific_usage=meta["provider_specific_usage"],
+        wall_time_seconds=wall_time_seconds,
+        measurement_availability=meta["measurement_availability"],
+        provenance=meta["provenance"],
     )
-
-    candidates = final_answers if final_answers else messages
-    if candidates:
-        for msg in reversed(candidates):
-            try:
-                parse_provider_json(msg, "copilot-cli")
-                return msg, usage
-            except ProviderBlockedError:
-                continue
-        return candidates[-1], usage
-    if parsed_any_jsonl:
-        raise ProviderBlockedError(
-            f"copilot-cli JSONL stream contained no assistant message (events={event_types[:10]})."
-        )
-    return stdout, usage
+    return text, usage
 
 
 MAX_PROVIDER_OUTPUT_BYTES = 2 * 1024 * 1024
 
 
 def _sanitized_provider_env(allow_key_env: str | None = None) -> dict[str, str]:
-    """Build a minimal environment for CLI subprocesses without leaking unrelated credentials."""
-    keep = ("PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TERM", "TMPDIR", "SYSTEMROOT", "COMSPEC")
-    env = {k: os.environ[k] for k in keep if k in os.environ}
-    if allow_key_env and allow_key_env in os.environ:
-        env[allow_key_env] = os.environ[allow_key_env]
-    return env
+    """Delegate to shared minimal allowlisted environment builder."""
+    return sanitized_cli_env(allow_key_env=allow_key_env)
 
 
 def _run_bounded_subprocess(
@@ -378,74 +292,73 @@ def _run_bounded_subprocess(
     return rc, stdout, stderr
 
 
-def call_claude_cli(prompt: str, allow_paid_api: bool = False, timeout: float = 90.0) -> tuple[str, dict[str, Any]]:
-    if not allow_paid_api:
-        raise ProviderBlockedError(
-            "Claude CLI inference requires explicit --allow-paid-api authorization."
-        )
-    exe = shutil.which("claude")
-    if not exe:
-        raise ProviderBlockedError("claude CLI is not installed on PATH.")
-    rc, stdout, stderr = _run_bounded_subprocess(
-        [exe, "-p", prompt, "--output-format", "json"],
-        env=_sanitized_provider_env("ANTHROPIC_API_KEY"),
-        timeout=timeout,
-        provider_label="claude CLI",
+def _run_subscription_cli(
+    provider: str,
+    exe_name: str,
+    prompt: str,
+    *,
+    allow_cli_session: bool = False,
+    allow_paid_api: bool = False,
+    allow_unisolated_cli: bool = False,
+    timeout: float = 90.0,
+    strip_var: str | None = None,
+) -> tuple[str, dict[str, Any]]:
+    ok, reason = authorize_provider_execution(
+        provider,
+        allow_cli_session=allow_cli_session,
+        allow_paid_api=allow_paid_api,
+        allow_unisolated_cli=allow_unisolated_cli,
     )
+    if not ok:
+        raise ProviderBlockedError(reason)
+    exe = shutil.which(exe_name)
+    if not exe:
+        raise ProviderBlockedError(f"{exe_name} CLI is not installed on PATH.")
+    cmd = build_cli_invocation(provider, exe, prompt)
+    t_sub = time.monotonic()
+    rc, stdout, stderr = _run_bounded_subprocess(
+        cmd,
+        env=sanitized_cli_env(strip_var),
+        timeout=timeout,
+        provider_label=f"{exe_name} CLI",
+    )
+    elapsed_sub = round(time.monotonic() - t_sub, 3)
     if rc != 0:
-        raise ProviderBlockedError(f"claude CLI failed (exit {rc}): {stderr.strip()}")
+        err_preview = stderr.strip()[:200] or stdout.strip()[:200]
+        raise ProviderBlockedError(f"{exe_name} CLI failed (exit {rc}): {err_preview}")
     try:
-        data = json.loads(stdout)
-        text = data.get("result") or stdout
-        u_raw = data.get("usage") or {}
-        cost = data.get("total_cost_usd", "UNKNOWN")
-        usage = make_usage_record(
-            cost_usd=cost if isinstance(cost, (int, float)) else "UNKNOWN",
-            premium_requests="UNKNOWN",
-            request_count=1,
-            input_tokens=u_raw.get("input_tokens", "UNKNOWN"),
-            output_tokens=u_raw.get("output_tokens", "UNKNOWN"),
-            provider_specific_usage={"http_attempts": "NOT_OBSERVABLE", "cached_tokens": u_raw.get("cache_read_input_tokens", "UNKNOWN")},
-            measurement_availability="provider_reported" if (u_raw or isinstance(cost, (int, float))) else "UNKNOWN",
-            provenance="claude-cli-json",
-        )
-    except json.JSONDecodeError:
-        text = stdout
-        usage = make_usage_record(request_count=1, provider_specific_usage={"http_attempts": "NOT_OBSERVABLE"}, provenance="claude-cli-raw")
+        text, meta = decode_cli_provider_stdout(provider, stdout, stderr)
+    except ProviderResponseError as exc:
+        raise ProviderBlockedError(str(exc)) from exc
+    usage = make_usage_record(
+        cost_usd=meta["cost_usd"],
+        premium_requests=meta["premium_requests"],
+        request_count=1,
+        input_tokens=meta["input_tokens"],
+        output_tokens=meta["output_tokens"],
+        total_tokens=meta.get("total_tokens"),
+        provider_specific_usage=meta["provider_specific_usage"],
+        wall_time_seconds=elapsed_sub,
+        measurement_availability=meta["measurement_availability"],
+        provenance=meta["provenance"],
+    )
     return text, usage
 
 
-def call_copilot_cli(prompt: str, allow_paid_api: bool = False, timeout: float = 120.0) -> tuple[str, dict[str, Any]]:
-    if not allow_paid_api:
-        raise ProviderBlockedError(
-            "Copilot CLI inference requires explicit --allow-paid-api authorization."
-        )
-    exe = shutil.which("copilot")
-    if not exe:
-        raise ProviderBlockedError("copilot CLI is not installed on PATH.")
-    rc, stdout, stderr = _run_bounded_subprocess(
-        [
-            exe,
-            "-p", prompt,
-            "--output-format", "json",
-            "--stream", "off",
-            "--no-ask-user",
-            "--no-custom-instructions",
-            "--disable-builtin-mcps",
-        ],
-        env=_sanitized_provider_env("GH_TOKEN"),
-        timeout=timeout,
-        provider_label="copilot CLI",
-    )
-    if rc != 0:
-        err_preview = stderr.strip()[:200] or stdout.strip()[:200]
-        raise ProviderBlockedError(f"copilot CLI failed (exit {rc}): {err_preview}")
-    if not stdout.strip():
-        err_preview = stderr.strip()[:200]
-        raise ProviderBlockedError(
-            f"copilot CLI returned empty stdout (stderr={err_preview!r})."
-        )
-    return extract_copilot_jsonl_response(stdout)
+def call_agy_cli(prompt: str, allow_cli_session: bool = False, allow_paid_api: bool = False, timeout: float = 90.0) -> tuple[str, dict[str, Any]]:
+    return _run_subscription_cli("agy-cli", "agy", prompt, allow_cli_session=allow_cli_session, allow_paid_api=allow_paid_api, timeout=timeout)
+
+
+def call_codex_cli(prompt: str, allow_cli_session: bool = False, allow_paid_api: bool = False, timeout: float = 90.0) -> tuple[str, dict[str, Any]]:
+    return _run_subscription_cli("codex-cli", "codex", prompt, allow_cli_session=allow_cli_session, allow_paid_api=allow_paid_api, timeout=timeout, strip_var="OPENAI_API_KEY")
+
+
+def call_claude_cli(prompt: str, allow_paid_api: bool = False, timeout: float = 90.0, allow_cli_session: bool = False) -> tuple[str, dict[str, Any]]:
+    return _run_subscription_cli("claude-cli", "claude", prompt, allow_cli_session=allow_cli_session, allow_paid_api=allow_paid_api, timeout=timeout, strip_var="ANTHROPIC_API_KEY")
+
+
+def call_copilot_cli(prompt: str, allow_paid_api: bool = False, timeout: float = 120.0, allow_cli_session: bool = False, allow_unisolated_cli: bool = False) -> tuple[str, dict[str, Any]]:
+    return _run_subscription_cli("copilot-cli", "copilot", prompt, allow_cli_session=allow_cli_session, allow_paid_api=allow_paid_api, allow_unisolated_cli=allow_unisolated_cli, timeout=timeout, strip_var="GH_TOKEN")
 
 
 def run_role(
@@ -455,6 +368,9 @@ def run_role(
     model: str,
     allow_paid_api: bool,
     fixture_data: dict[str, Any] | None,
+    allow_cli_session: bool = False,
+    budget: ProviderCallBudget | None = None,
+    allow_unisolated_cli: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     if provider == "fixture":
         assert fixture_data is not None
@@ -468,16 +384,32 @@ def run_role(
             measurement_availability="fixture_zero",
             provenance="offline_fixture",
         )
-    if provider == "openai-responses":
-        raw, usage = call_openai_responses_web_search(prompt, model=model, allow_paid_api=allow_paid_api)
-        return validate_role_payload(role_name, parse_provider_json(raw, provider), provider), usage
-    if provider == "claude-cli":
-        raw, usage = call_claude_cli(prompt, allow_paid_api=allow_paid_api)
-        return validate_role_payload(role_name, parse_provider_json(raw, provider), provider), usage
-    if provider == "copilot-cli":
-        raw, usage = call_copilot_cli(prompt, allow_paid_api=allow_paid_api)
-        return validate_role_payload(role_name, parse_provider_json(raw, provider), provider), usage
-    raise ProviderBlockedError(f"Unsupported provider: {provider}")
+    if budget is not None:
+        try:
+            budget.consume(role_name.lower())
+        except BudgetExhaustedError as exc:
+            raise ProviderBlockedError(str(exc)) from exc
+    try:
+        if provider == "openai-responses":
+            raw, usage = call_openai_responses_web_search(prompt, model=model, allow_paid_api=allow_paid_api)
+        elif provider == "agy-cli":
+            raw, usage = call_agy_cli(prompt, allow_cli_session=allow_cli_session, allow_paid_api=allow_paid_api)
+        elif provider == "codex-cli":
+            raw, usage = call_codex_cli(prompt, allow_cli_session=allow_cli_session, allow_paid_api=allow_paid_api)
+        elif provider == "claude-cli":
+            raw, usage = call_claude_cli(prompt, allow_paid_api=allow_paid_api, allow_cli_session=allow_cli_session)
+        elif provider == "copilot-cli":
+            raw, usage = call_copilot_cli(prompt, allow_paid_api=allow_paid_api, allow_cli_session=allow_cli_session, allow_unisolated_cli=allow_unisolated_cli)
+        else:
+            raise ProviderBlockedError(f"Unsupported provider: {provider}")
+        validated = validate_role_payload(role_name, parse_provider_json(raw, provider), provider)
+    except Exception:
+        if budget is not None:
+            budget.record_failure()
+        raise
+    if budget is not None:
+        budget.record_success()
+    return validated, usage
 
 
 def _fetch_openalex_by_doi(
@@ -697,11 +629,27 @@ def write_ai_native_outputs(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="TAKO AI-Native SOTA Discovery Workflow")
-    parser.add_argument("--topic", required=True)
-    parser.add_argument("--objective", required=True)
+    parser = argparse.ArgumentParser(
+        prog="tako sota-ai",
+        description="TAKO Research Mate / AI-Native SOTA Workflow (Researcher -> Analyst -> optional Reviewer)",
+        epilog=(
+            "Examples:\n"
+            "  tako sota-ai --topic 'Edge AI' --objective 'Survey latency' --provider fixture\n"
+            "  tako sota-ai --topic 'Edge AI' --objective 'Survey latency' --provider claude-cli --allow-cli-session\n"
+            "  tako sota-ai --topic 'Edge AI' --objective 'Survey latency' --provider openai-responses --allow-paid-api"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("--topic", default=None)
+    parser.add_argument("--objective", default=None)
+    parser.add_argument("--workspace", type=pathlib.Path, default=None, help="Optional TAKO workspace directory (tako_workspace.json)")
     parser.add_argument("--max-papers", type=int, default=10)
-    parser.add_argument("--provider", choices=["openai-responses", "claude-cli", "copilot-cli", "fixture"], default="openai-responses")
+    parser.add_argument(
+        "--provider",
+        choices=["agy-cli", "codex-cli", "claude-cli", "copilot-cli", "openai-responses", "fixture"],
+        default="fixture",
+        help="AI provider (default: fixture; use --allow-cli-session for local AI CLIs or --allow-paid-api for direct API)",
+    )
     parser.add_argument("--model", default="gpt-4.1-mini")
     parser.add_argument("--with-reviewer", action="store_true", help="Run optional Reviewer role")
     parser.add_argument("--verify-bib", action="store_true", help="Optionally verify citations via OpenAlex")
@@ -711,14 +659,60 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Maximum observable HTTP attempts for --verify-bib (OpenAlex); does not bound black-box provider CLI network activity",
     )
-    parser.add_argument("--allow-paid-api", action="store_true", help="Explicitly authorize paid provider API/CLI calls")
+    parser.add_argument(
+        "--max-provider-calls",
+        type=int,
+        default=None,
+        help="Maximum provider subprocess invocations across workflow stages (0 blocks all live provider calls; does not cap internal model turns)",
+    )
+    parser.add_argument(
+        "--allow-cli-session",
+        action="store_true",
+        help="Authorize local authenticated AI CLI execution (may consume subscription quotas, credits, or premium requests)",
+    )
+    parser.add_argument("--allow-paid-api", action="store_true", help="Explicitly authorize direct metered API calls (e.g. openai-responses)")
+    parser.add_argument("--allow-unisolated-cli", action="store_true", help="Explicitly authorize excluded non-sandboxed CLIs (e.g. copilot-cli)")
     parser.add_argument("--fixture", type=pathlib.Path, default=None, help="Offline JSON fixture for --provider fixture (defaults to bundled example_fixture.json)")
-    parser.add_argument("--out-dir", default="sota_ai_native_output")
+    parser.add_argument("--out-dir", default=None)
+    parser.add_argument("--force", action="store_true", help="Allow overwriting non-empty output directory")
+    parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON output only")
+    parser.add_argument("--events-file", type=pathlib.Path, default=None, help="Optional JSONL path for workflow events")
     args = parser.parse_args(argv)
+
+    from tools.research_workspace import ensure_safe_out_dir, load_workspace, register_workflow_stage
+    from tools.workflow_events import WorkflowEventEmitter, make_run_id, sanitize_error
+
+    ws_manifest = None
+    if args.workspace is not None:
+        try:
+            ws_manifest = load_workspace(args.workspace)
+        except Exception as exc:
+            print(f"WORKSPACE_ERROR: {exc}", file=sys.stderr)
+            return 2
+        if args.topic is None:
+            args.topic = ws_manifest["topic"]
+        if args.objective is None:
+            args.objective = ws_manifest["objective"]
+
+    if not args.topic or not args.objective:
+        print("ERROR: --topic and --objective are required (or pass --workspace with tako_workspace.json).", file=sys.stderr)
+        return 2
+
+    if args.out_dir is None:
+        args.out_dir = str((args.workspace / "sota_ai_native_output") if args.workspace is not None else pathlib.Path("sota_ai_native_output"))
 
     if args.max_http_requests is not None and args.max_http_requests < 1:
         print("ERROR: --max-http-requests must be >= 1", file=sys.stderr)
         return 2
+    if args.max_provider_calls is not None and args.max_provider_calls < 0:
+        print("ERROR: --max-provider-calls must be >= 0", file=sys.stderr)
+        return 2
+    effective_provider_calls = (
+        args.max_provider_calls
+        if args.max_provider_calls is not None
+        else (None if args.provider == "fixture" else (3 if args.with_reviewer else 2))
+    )
+    provider_budget = ProviderCallBudget(max_calls=effective_provider_calls)
 
     from tools.researcher_setup import SetupConfigError, resolve_effective_discovery_settings
 
@@ -744,7 +738,30 @@ def main(argv: list[str] | None = None) -> int:
         fixture_data = json.loads(fixture_path.read_text(encoding="utf-8"))
 
     out_dir = pathlib.Path(args.out_dir)
+    if args.workspace is not None or args.force:
+        try:
+            ensure_safe_out_dir(out_dir, force=args.force)
+        except Exception as exc:
+            print(f"OUTPUT_ERROR: {exc}", file=sys.stderr)
+            return 2
+
+    run_id = make_run_id("sota-ai")
+    events_path = args.events_file
+    if events_path is None and args.workspace is not None:
+        events_path = args.workspace / "runs" / f"{run_id}_events.jsonl"
+    emitter = WorkflowEventEmitter(
+        workflow="sota-ai",
+        workspace_id=(ws_manifest["research_id"] if ws_manifest else "standalone"),
+        run_id=run_id,
+        events_file=events_path,
+        json_mode=args.json,
+    )
+    emitter.emit("workflow_started", stage="discovery", status="RUNNING", message=f"Topic: {args.topic} | Provider: {args.provider}")
+    if args.workspace is not None:
+        register_workflow_stage(args.workspace, "discovery", status="RUNNING", run_id=run_id, out_dir=out_dir)
+
     try:
+        emitter.emit("stage_started", stage="researcher", status="RUNNING", message="Running Researcher stage")
         ts_r0 = time.monotonic()
         researcher_prompt = (
             f"Role: RESEARCHER. Topic: {args.topic}. Objective: {args.objective}. "
@@ -753,7 +770,7 @@ def main(argv: list[str] | None = None) -> int:
             f"'Title', 'Authors' (semicolon-separated string), 'Year', 'Publication venue', 'DOI or source URL', "
             f"'Relevance rationale', 'Seminal work candidate', 'Evidence level' [one of: metadata-only, abstract-based, model-recall, NOT_VERIFIED])."
         )
-        researcher_out, u1 = run_role("researcher", researcher_prompt, args.provider, args.model, args.allow_paid_api, fixture_data)
+        researcher_out, u1 = run_role("researcher", researcher_prompt, args.provider, args.model, args.allow_paid_api, fixture_data, allow_cli_session=args.allow_cli_session, budget=provider_budget, allow_unisolated_cli=args.allow_unisolated_cli)
         _save_stage_json(out_dir, "stage_01_researcher.json", {"elapsed_seconds": round(time.monotonic() - ts_r0, 3), "usage": u1, "payload": researcher_out})
 
         bib_tracker = HttpRequestTracker(max_http_requests=args.max_http_requests) if args.verify_bib else None
@@ -766,13 +783,14 @@ def main(argv: list[str] | None = None) -> int:
         ts_a0 = time.monotonic()
         analyst_prompt = (
             f"Role: ANALYST. Objective: {args.objective}. Analyze these papers strictly from accessible evidence, "
-            f"marking unsupported fields NOT_VERIFIED and preserving original returned fields. "
+            f"marking unsupported fields NOT_VERIFIED, never propagating experimental conditions across datasets, and preserving original returned fields. "
             f"Return ONLY a single valid JSON object (no markdown, no prose) with keys 'comparative_notes' and 'papers' "
             f"(including 'Title', 'Authors', 'Year', 'Publication venue', 'DOI or source URL', 'Relevance rationale', "
-            f"'Seminal work candidate', 'Research contribution', 'Reported results', 'Limitations', 'Evidence level'). "
+            f"'Seminal work candidate', 'Research contribution', 'Reported results', 'Limitations', "
+            f"'Evidence level' [strictly one of: metadata-only, abstract-based, full-text, model-recall, NOT_VERIFIED, UNKNOWN]). "
             f"Papers: {json.dumps(researcher_out)}. Bibliographic verification: {json.dumps(bib_checks)}."
         )
-        analyst_out, u2 = run_role("analyst", analyst_prompt, args.provider, args.model, args.allow_paid_api, fixture_data)
+        analyst_out, u2 = run_role("analyst", analyst_prompt, args.provider, args.model, args.allow_paid_api, fixture_data, allow_cli_session=args.allow_cli_session, budget=provider_budget, allow_unisolated_cli=args.allow_unisolated_cli)
         _save_stage_json(out_dir, "stage_03_analyst.json", {"elapsed_seconds": round(time.monotonic() - ts_a0, 3), "usage": u2, "payload": analyst_out})
 
         reviewer_out = None
@@ -784,17 +802,27 @@ def main(argv: list[str] | None = None) -> int:
                 f"{json.dumps(analyst_out)} (bib_checks={json.dumps(bib_checks)}). "
                 f"Return ONLY a single valid JSON object (no markdown, no prose) with keys 'challenged_claims', 'missing_foundational', 'corrections' (all lists of strings)."
             )
-            reviewer_out, u3 = run_role("reviewer", reviewer_prompt, args.provider, args.model, args.allow_paid_api, fixture_data)
+            reviewer_out, u3 = run_role("reviewer", reviewer_prompt, args.provider, args.model, args.allow_paid_api, fixture_data, allow_cli_session=args.allow_cli_session, budget=provider_budget, allow_unisolated_cli=args.allow_unisolated_cli)
             _save_stage_json(out_dir, "stage_04_reviewer.json", {"elapsed_seconds": round(time.monotonic() - ts_v0, 3), "usage": u3, "payload": reviewer_out})
     except ProviderBlockedError as exc:
+        err_s = sanitize_error(exc)
+        emitter.emit("stage_failed", stage="discovery", status="FAILED", error=err_s, message=err_s)
+        if args.workspace is not None:
+            register_workflow_stage(args.workspace, "discovery", status="FAILED", run_id=run_id, out_dir=out_dir, error=err_s)
         print(f"PROVIDER_BLOCKED: {exc}", file=sys.stderr)
         return 1
+    except KeyboardInterrupt:
+        emitter.emit("workflow_interrupted", stage="discovery", status="INTERRUPTED", message="Interrupted by user")
+        if args.workspace is not None:
+            register_workflow_stage(args.workspace, "discovery", status="INTERRUPTED", run_id=run_id, out_dir=out_dir, error="Interrupted by user")
+        print("AI_NATIVE_INTERRUPTED: Run interrupted by user.", file=sys.stderr)
+        return 130
 
     elapsed = time.monotonic() - t0
     usage_records = [u1, u2] + ([u3] if u3 is not None else [])
     usage_totals = aggregate_usage_records(usage_records, wall_time_seconds=elapsed)
     outputs = write_ai_native_outputs(
-        out_dir=pathlib.Path(args.out_dir),
+        out_dir=out_dir,
         topic=args.topic,
         objective=args.objective,
         provider=args.provider,
@@ -805,5 +833,12 @@ def main(argv: list[str] | None = None) -> int:
         usage_totals=usage_totals,
         elapsed_seconds=elapsed,
     )
-    print(f"AI_NATIVE_COMPLETE provider={args.provider} reviewer={args.with_reviewer} outputs={[str(p) for p in outputs]}")
+    out_strs = [str(p) for p in outputs]
+    emitter.emit("workflow_completed", stage="discovery", status="COMPLETED", artifacts=out_strs, message=f"Completed: provider={args.provider}, out_dir={out_dir}")
+    if args.workspace is not None:
+        register_workflow_stage(args.workspace, "discovery", status="COMPLETED", run_id=run_id, out_dir=out_dir, outputs=outputs, summary={"provider": args.provider, "reviewer": args.with_reviewer})
+    if args.json:
+        print(json.dumps({"status": "AI_NATIVE_COMPLETE", "run_id": run_id, "provider": args.provider, "reviewer": args.with_reviewer, "elapsed_seconds": round(elapsed, 3), "provider_call_budget": provider_budget.summary(), "outputs": out_strs}, indent=2, ensure_ascii=False))
+        return 0
+    print(f"AI_NATIVE_COMPLETE provider={args.provider} reviewer={args.with_reviewer} outputs={out_strs}")
     return 0

@@ -30,18 +30,18 @@ class CliProductExperienceTests(unittest.TestCase):
             with redirect_stdout(buf):
                 cli_main(["--version"])
         self.assertEqual(ctx.exception.code, 0)
-        self.assertIn("0.1.0a2", buf.getvalue())
+        self.assertIn("0.1.0a3", buf.getvalue())
 
         buf_doc = io.StringIO()
         with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "sk-secret-rx18-never-leak"}):
             with redirect_stdout(buf_doc):
-                rc = cli_main(["doctor"])
+                rc = cli_main(["doctor", "--verbose"])
         self.assertEqual(rc, 0)
         out = buf_doc.getvalue()
         self.assertNotIn("sk-secret-rx18-never-leak", out)
         self.assertIn("AUTHENTICATED=", out)
         self.assertIn("evidence_pdf: UNSUPPORTED", out)
-        self.assertIn("windows_native: NOT_TESTED", out)
+        self.assertIn("windows_ci: CI_TESTED", out)
 
     def test_rx03_rx15_rx18_workspace_init_status_and_no_secret_leakage(self):
         with tempfile.TemporaryDirectory() as tmp:
