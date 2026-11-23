@@ -41,7 +41,8 @@ SCREEN_INSUFFICIENT_EVIDENCE = "INSUFFICIENT_EVIDENCE"
 
 # Termination reasons
 TERM_SATURATION = "SATURATION"
-TERM_TARGET_COVERAGE_REACHED = "TARGET_COVERAGE_REACHED"
+TERM_MIN_BREADTH_REACHED = "MIN_TOPIC_BREADTH_REACHED"
+TERM_TARGET_COVERAGE_REACHED = TERM_MIN_BREADTH_REACHED
 TERM_STAGNATION = "STAGNATION"
 TERM_BUDGET_EXHAUSTED = "BUDGET_EXHAUSTED"
 TERM_MAX_ROUNDS_REACHED = "MAX_ROUNDS_REACHED"
@@ -364,6 +365,95 @@ def _work_to_record(w: dict[str, Any], plan: dict[str, Any], source_path: str) -
     }
 
 
+def _extract_core_concept_query(topic: str) -> str:
+    """Syntactically decompose long qualified topics into a core concept query without hardcoded domain terms."""
+    tokens = [t for t in re.findall(r"[a-zA-Z0-9-]+", topic.strip()) if t]
+    connectors = {"for", "on", "in", "with", "using", "via", "under", "of", "and", "the", "a", "an"}
+    content = []
+    for tok in tokens:
+        if tok.lower() in connectors:
+            if len(content) >= 2:
+                break
+            continue
+        content.append(tok)
+    if len(content) >= 2 and len(content) < len(tokens):
+        return " ".join(content[:4])
+    return ""
+
+
+def compute_relevance_signals(
+    rec: dict[str, Any],
+    plan: dict[str, Any],
+    *,
+    in_corpus_ref_counts: dict[str, int] | None = None,
+    year_bounds: tuple[int | None, int | None] = (None, None),
+) -> dict[str, Any]:
+    """Compute transparent, inspectable scientific relevance signals (never an opaque quality score)."""
+    import math
+
+    title = str(rec.get("Title") or "")
+    abstract = str(rec.get("_abstract") or "")
+    text_blob = f"{title} {abstract} {' '.join(rec.get('_concepts') or [])}".lower()
+    work_tokens = tokenize(text_blob)
+
+    topic_terms = {t.lower() for t in tokenize(plan["topic"])}
+    topic_rel = round(len(topic_terms & work_tokens) / max(1, len(topic_terms)), 3)
+
+    obj_terms = {t.lower() for t in tokenize(plan["objective"]) if t.lower() not in OPERATIONAL_OBJECTIVE_STOPWORDS}
+    obj_rel = round(len(obj_terms & work_tokens) / max(1, len(obj_terms)), 3) if obj_terms else 0.0
+
+    matched_dims = len(rec.get("_matched_dimensions") or [])
+    total_dims = max(1, len(plan.get("target_dimensions") or {}))
+    concept_cov = round(min(1.0, matched_dims / total_dims), 3)
+
+    method_cues = {"architecture", "network", "method", "algorithm", "model", "benchmark", "evaluation", "dataset", "framework", "latency", "accuracy"}
+    method_rel = round(min(1.0, len(method_cues & work_tokens) / 3.0), 3)
+
+    cites = int(rec.get("_cited_by") or rec.get("_cited_by_count") or 0)
+    in_refs = int((in_corpus_ref_counts or {}).get(str(rec.get("_openalex_id") or ""), 0))
+    cite_norm = min(1.0, math.log1p(max(0, cites)) / math.log1p(5000))
+    ref_norm = min(1.0, in_refs / 3.0)
+    citation_lineage = round(min(1.0, 0.7 * cite_norm + 0.3 * ref_norm), 3)
+
+    bib_ver = 1.0 if rec.get("Bibliographic status") == BIB_STATUS_VERIFIED else 0.0
+    ev_avail = str(rec.get("Evidence availability") or "")
+    ev_score = 1.0 if "FULL_TEXT" in ev_avail else (0.6 if "ABSTRACT" in ev_avail else 0.2)
+
+    y = rec.get("Year")
+    y_min, y_max = year_bounds
+    temp_div = 0.5
+    if isinstance(y, int) and isinstance(y_min, int) and isinstance(y_max, int) and y_max > y_min:
+        # Reward both foundational earlier works and recent contemporary works within the corpus span
+        pos = (y - y_min) / (y_max - y_min)
+        temp_div = round(0.5 + 0.5 * abs(2.0 * pos - 1.0), 3)
+
+    composite = round(
+        0.25 * topic_rel
+        + 0.15 * obj_rel
+        + 0.15 * concept_cov
+        + 0.15 * method_rel
+        + 0.15 * citation_lineage
+        + 0.05 * bib_ver
+        + 0.05 * ev_score
+        + 0.05 * temp_div,
+        4,
+    )
+    is_foundational_candidate = bool(citation_lineage >= 0.55 or in_refs >= 2)
+    return {
+        "topic_relevance": topic_rel,
+        "objective_relevance": obj_rel,
+        "concept_coverage": concept_cov,
+        "methodological_relevance": method_rel,
+        "citation_lineage": citation_lineage,
+        "bibliographic_verification": bib_ver,
+        "available_evidence": ev_score,
+        "temporal_diversity": temp_div,
+        "composite_relevance": composite,
+        "foundational_candidate": is_foundational_candidate,
+        "seminal_status": "FOUNDATIONAL_CANDIDATE (requires human confirmation)" if is_foundational_candidate else "STANDARD_CANDIDATE",
+    }
+
+
 def screen_candidate(rec: dict[str, Any], plan: dict[str, Any]) -> dict[str, Any]:
     """Deterministic relevance screening separating identity from relevance and missing evidence."""
     title = rec["Title"]
@@ -497,6 +587,9 @@ def run_iterative_discovery(
     query_queue: list[dict[str, Any]] = [
         {"query_text": plan["topic"], "origin": "user_topic", "target_dimensions": ["core_topic"]}
     ]
+    core_q = _extract_core_concept_query(plan["topic"])
+    if core_q and core_q.lower() != plan["topic"].lower():
+        query_queue.append({"query_text": core_q, "origin": "foundational_concept", "target_dimensions": ["core_topic"]})
     for s in plan["user_seeds"]:
         query_queue.append({"query_text": s, "origin": "user_seed", "target_dimensions": []})
 
@@ -797,6 +890,24 @@ def run_iterative_discovery(
             termination_reason = TERM_INSUFFICIENT_EVIDENCE
         else:
             termination_reason = TERM_MAX_ROUNDS_REACHED
+
+    # Compute transparent multi-signal relevance & foundational candidate annotations
+    in_corpus_ref_counts: dict[str, int] = {}
+    for edge in citation_edges:
+        tgt = edge.get("to") or ""
+        if tgt:
+            in_corpus_ref_counts[tgt] = in_corpus_ref_counts.get(tgt, 0) + 1
+    years_present = [r["Year"] for r in buckets["ACCEPTED_CORPUS"].values() if isinstance(r.get("Year"), int)]
+    year_bounds = (min(years_present), max(years_present)) if years_present else (None, None)
+    ranked_items: list[tuple[float, float, str, dict[str, Any]]] = []
+    for cid, rec in buckets["ACCEPTED_CORPUS"].items():
+        sigs = compute_relevance_signals(rec, plan, in_corpus_ref_counts=in_corpus_ref_counts, year_bounds=year_bounds)
+        rec["ranking_signals"] = sigs
+        if sigs["foundational_candidate"] and str(rec.get("Seminal work candidate") or "").upper() in ("", "UNKNOWN", "NO"):
+            rec["Seminal work candidate"] = sigs["seminal_status"]
+        ranked_items.append((sigs["composite_relevance"], sigs["citation_lineage"], cid, rec))
+    ranked_items.sort(key=lambda x: (-x[0], -x[1], x[2]))
+    buckets["ACCEPTED_CORPUS"] = {cid: rec for _, _, cid, rec in ranked_items}
 
     final_cov = assess_accepted_coverage(
         list(buckets["ACCEPTED_CORPUS"].values()),
