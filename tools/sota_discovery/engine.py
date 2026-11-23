@@ -592,12 +592,9 @@ def run_iterative_discovery(
     ]
     core_q = _extract_core_concept_query(plan["topic"])
     if core_q and core_q.lower() != plan["topic"].lower():
-        q_item: dict[str, Any] = {"query_text": core_q, "origin": "foundational_concept", "target_dimensions": ["core_topic"]}
         if supports_sort:
-            q_item["sort"] = "cited_by_count:desc"
-        query_queue.append(q_item)
-    elif supports_sort:
-        query_queue.append({"query_text": plan["topic"], "origin": "foundational_citation", "target_dimensions": ["core_topic"], "sort": "cited_by_count:desc"})
+            query_queue.append({"query_text": core_q, "origin": "foundational_concept", "target_dimensions": ["core_topic"], "sort": "cited_by_count:desc"})
+        query_queue.append({"query_text": core_q, "origin": "contemporary_concept", "target_dimensions": ["core_topic"]})
     for s in plan["user_seeds"]:
         query_queue.append({"query_text": s, "origin": "user_seed", "target_dimensions": []})
 
