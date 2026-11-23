@@ -18,6 +18,8 @@ import urllib.request
 from typing import Any
 
 from tools.ai_cli_providers import (
+    BudgetExhaustedError,
+    ProviderCallBudget,
     authorize_provider_execution,
     build_cli_invocation,
     sanitized_cli_env,
@@ -287,12 +289,8 @@ MAX_PROVIDER_OUTPUT_BYTES = 2 * 1024 * 1024
 
 
 def _sanitized_provider_env(allow_key_env: str | None = None) -> dict[str, str]:
-    """Build a minimal environment for CLI subprocesses without leaking unrelated credentials."""
-    keep = ("PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TERM", "TMPDIR", "SYSTEMROOT", "COMSPEC")
-    env = {k: os.environ[k] for k in keep if k in os.environ}
-    if allow_key_env and allow_key_env in os.environ:
-        env[allow_key_env] = os.environ[allow_key_env]
-    return env
+    """Delegate to shared minimal allowlisted environment builder."""
+    return sanitized_cli_env(allow_key_env=allow_key_env)
 
 
 def _run_bounded_subprocess(
@@ -460,6 +458,7 @@ def run_role(
     allow_paid_api: bool,
     fixture_data: dict[str, Any] | None,
     allow_cli_session: bool = False,
+    budget: ProviderCallBudget | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     if provider == "fixture":
         assert fixture_data is not None
@@ -473,22 +472,32 @@ def run_role(
             measurement_availability="fixture_zero",
             provenance="offline_fixture",
         )
-    if provider == "openai-responses":
-        raw, usage = call_openai_responses_web_search(prompt, model=model, allow_paid_api=allow_paid_api)
-        return validate_role_payload(role_name, parse_provider_json(raw, provider), provider), usage
-    if provider == "agy-cli":
-        raw, usage = call_agy_cli(prompt, allow_cli_session=allow_cli_session, allow_paid_api=allow_paid_api)
-        return validate_role_payload(role_name, parse_provider_json(raw, provider), provider), usage
-    if provider == "codex-cli":
-        raw, usage = call_codex_cli(prompt, allow_cli_session=allow_cli_session, allow_paid_api=allow_paid_api)
-        return validate_role_payload(role_name, parse_provider_json(raw, provider), provider), usage
-    if provider == "claude-cli":
-        raw, usage = call_claude_cli(prompt, allow_paid_api=allow_paid_api, allow_cli_session=allow_cli_session)
-        return validate_role_payload(role_name, parse_provider_json(raw, provider), provider), usage
-    if provider == "copilot-cli":
-        raw, usage = call_copilot_cli(prompt, allow_paid_api=allow_paid_api, allow_cli_session=allow_cli_session)
-        return validate_role_payload(role_name, parse_provider_json(raw, provider), provider), usage
-    raise ProviderBlockedError(f"Unsupported provider: {provider}")
+    if budget is not None:
+        try:
+            budget.consume(role_name.lower())
+        except BudgetExhaustedError as exc:
+            raise ProviderBlockedError(str(exc)) from exc
+    try:
+        if provider == "openai-responses":
+            raw, usage = call_openai_responses_web_search(prompt, model=model, allow_paid_api=allow_paid_api)
+        elif provider == "agy-cli":
+            raw, usage = call_agy_cli(prompt, allow_cli_session=allow_cli_session, allow_paid_api=allow_paid_api)
+        elif provider == "codex-cli":
+            raw, usage = call_codex_cli(prompt, allow_cli_session=allow_cli_session, allow_paid_api=allow_paid_api)
+        elif provider == "claude-cli":
+            raw, usage = call_claude_cli(prompt, allow_paid_api=allow_paid_api, allow_cli_session=allow_cli_session)
+        elif provider == "copilot-cli":
+            raw, usage = call_copilot_cli(prompt, allow_paid_api=allow_paid_api, allow_cli_session=allow_cli_session)
+        else:
+            raise ProviderBlockedError(f"Unsupported provider: {provider}")
+        validated = validate_role_payload(role_name, parse_provider_json(raw, provider), provider)
+    except Exception:
+        if budget is not None:
+            budget.record_failure()
+        raise
+    if budget is not None:
+        budget.record_success()
+    return validated, usage
 
 
 def _fetch_openalex_by_doi(
@@ -739,6 +748,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Maximum observable HTTP attempts for --verify-bib (OpenAlex); does not bound black-box provider CLI network activity",
     )
     parser.add_argument(
+        "--max-provider-calls",
+        type=int,
+        default=None,
+        help="Maximum provider subprocess invocations across workflow stages (0 blocks all live provider calls; does not cap internal model turns)",
+    )
+    parser.add_argument(
         "--allow-cli-session",
         action="store_true",
         help="Authorize local authenticated AI CLI execution (may consume subscription quotas, credits, or premium requests)",
@@ -776,6 +791,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.max_http_requests is not None and args.max_http_requests < 1:
         print("ERROR: --max-http-requests must be >= 1", file=sys.stderr)
         return 2
+    if args.max_provider_calls is not None and args.max_provider_calls < 0:
+        print("ERROR: --max-provider-calls must be >= 0", file=sys.stderr)
+        return 2
+    provider_budget = ProviderCallBudget(max_calls=args.max_provider_calls)
 
     from tools.researcher_setup import SetupConfigError, resolve_effective_discovery_settings
 
@@ -833,7 +852,7 @@ def main(argv: list[str] | None = None) -> int:
             f"'Title', 'Authors' (semicolon-separated string), 'Year', 'Publication venue', 'DOI or source URL', "
             f"'Relevance rationale', 'Seminal work candidate', 'Evidence level' [one of: metadata-only, abstract-based, model-recall, NOT_VERIFIED])."
         )
-        researcher_out, u1 = run_role("researcher", researcher_prompt, args.provider, args.model, args.allow_paid_api, fixture_data, allow_cli_session=args.allow_cli_session)
+        researcher_out, u1 = run_role("researcher", researcher_prompt, args.provider, args.model, args.allow_paid_api, fixture_data, allow_cli_session=args.allow_cli_session, budget=provider_budget)
         _save_stage_json(out_dir, "stage_01_researcher.json", {"elapsed_seconds": round(time.monotonic() - ts_r0, 3), "usage": u1, "payload": researcher_out})
 
         bib_tracker = HttpRequestTracker(max_http_requests=args.max_http_requests) if args.verify_bib else None
@@ -852,7 +871,7 @@ def main(argv: list[str] | None = None) -> int:
             f"'Seminal work candidate', 'Research contribution', 'Reported results', 'Limitations', 'Evidence level'). "
             f"Papers: {json.dumps(researcher_out)}. Bibliographic verification: {json.dumps(bib_checks)}."
         )
-        analyst_out, u2 = run_role("analyst", analyst_prompt, args.provider, args.model, args.allow_paid_api, fixture_data, allow_cli_session=args.allow_cli_session)
+        analyst_out, u2 = run_role("analyst", analyst_prompt, args.provider, args.model, args.allow_paid_api, fixture_data, allow_cli_session=args.allow_cli_session, budget=provider_budget)
         _save_stage_json(out_dir, "stage_03_analyst.json", {"elapsed_seconds": round(time.monotonic() - ts_a0, 3), "usage": u2, "payload": analyst_out})
 
         reviewer_out = None
@@ -864,7 +883,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"{json.dumps(analyst_out)} (bib_checks={json.dumps(bib_checks)}). "
                 f"Return ONLY a single valid JSON object (no markdown, no prose) with keys 'challenged_claims', 'missing_foundational', 'corrections' (all lists of strings)."
             )
-            reviewer_out, u3 = run_role("reviewer", reviewer_prompt, args.provider, args.model, args.allow_paid_api, fixture_data, allow_cli_session=args.allow_cli_session)
+            reviewer_out, u3 = run_role("reviewer", reviewer_prompt, args.provider, args.model, args.allow_paid_api, fixture_data, allow_cli_session=args.allow_cli_session, budget=provider_budget)
             _save_stage_json(out_dir, "stage_04_reviewer.json", {"elapsed_seconds": round(time.monotonic() - ts_v0, 3), "usage": u3, "payload": reviewer_out})
     except ProviderBlockedError as exc:
         err_s = sanitize_error(exc)
@@ -900,7 +919,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.workspace is not None:
         register_workflow_stage(args.workspace, "discovery", status="COMPLETED", run_id=run_id, out_dir=out_dir, outputs=outputs, summary={"provider": args.provider, "reviewer": args.with_reviewer})
     if args.json:
-        print(json.dumps({"status": "AI_NATIVE_COMPLETE", "run_id": run_id, "provider": args.provider, "reviewer": args.with_reviewer, "elapsed_seconds": round(elapsed, 3), "outputs": out_strs}, indent=2, ensure_ascii=False))
+        print(json.dumps({"status": "AI_NATIVE_COMPLETE", "run_id": run_id, "provider": args.provider, "reviewer": args.with_reviewer, "elapsed_seconds": round(elapsed, 3), "provider_call_budget": provider_budget.summary(), "outputs": out_strs}, indent=2, ensure_ascii=False))
         return 0
     print(f"AI_NATIVE_COMPLETE provider={args.provider} reviewer={args.with_reviewer} outputs={out_strs}")
     return 0
