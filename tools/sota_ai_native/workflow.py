@@ -20,8 +20,12 @@ from typing import Any
 from tools.ai_cli_providers import (
     BudgetExhaustedError,
     ProviderCallBudget,
+    ProviderResponseError,
     authorize_provider_execution,
     build_cli_invocation,
+    decode_cli_provider_stdout,
+    decode_copilot_jsonl,
+    parse_structured_json_response,
     sanitized_cli_env,
 )
 from tools.sota_discovery.sota import HttpBudgetExhaustedError, HttpRequestTracker, fetch_openalex
@@ -101,41 +105,10 @@ def call_openai_responses_web_search(
 
 
 def parse_provider_json(raw: str, provider: str) -> dict[str, Any]:
-    text = raw.strip()
-    if not text:
-        raise ProviderBlockedError(f"{provider} returned an empty response (0 bytes after stripping).")
-
-    candidates: list[str] = [text]
-    for fence_match in re.finditer(r"```(?:json)?\s*\n(.*?)```", text, flags=re.DOTALL | re.IGNORECASE):
-        candidates.append(fence_match.group(1).strip())
-
-    decoder = json.JSONDecoder()
-    for cand in candidates:
-        try:
-            parsed = json.loads(cand)
-            if isinstance(parsed, dict):
-                return parsed
-        except json.JSONDecodeError:
-            pass
-        found: list[dict[str, Any]] = []
-        idx = cand.find("{")
-        while idx != -1:
-            try:
-                parsed, end_idx = decoder.raw_decode(cand, idx)
-                if isinstance(parsed, dict):
-                    found.append(parsed)
-                    idx = cand.find("{", end_idx)
-                    continue
-            except json.JSONDecodeError:
-                pass
-            idx = cand.find("{", idx + 1)
-        if len(found) > 1:
-            raise ProviderBlockedError(f"{provider} returned multiple competing JSON objects ({len(found)}).")
-        if len(found) == 1:
-            return found[0]
-
-    preview = text[:160].replace("\n", " ")
-    raise ProviderBlockedError(f"{provider} returned invalid JSON (no JSON object found; preview={preview!r}).")
+    try:
+        return parse_structured_json_response(raw, provider)
+    except ProviderResponseError as exc:
+        raise ProviderBlockedError(str(exc)) from exc
 
 
 VALID_EVIDENCE_LEVELS = {
@@ -206,83 +179,24 @@ def validate_role_payload(role_name: str, payload: dict[str, Any], provider: str
     return payload
 
 
-def extract_copilot_jsonl_response(stdout: str) -> tuple[str, dict[str, Any]]:
+def extract_copilot_jsonl_response(stdout: str, *, wall_time_seconds: float = 0.0) -> tuple[str, dict[str, Any]]:
     """Extract assistant text and usage metadata from Copilot CLI --output-format json (JSONL)."""
-    input_tokens: int | str = "UNKNOWN"
-    output_tokens: int | str = "UNKNOWN"
-    premium_requests: int | str = "UNKNOWN"
-    cost_usd: float | str = "UNKNOWN"
-    provider_specific: dict[str, Any] = {}
-    messages: list[str] = []
-    final_answers: list[str] = []
-    event_types: list[str] = []
-    parsed_any_jsonl = False
-
-    for line in stdout.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(obj, dict):
-            continue
-        parsed_any_jsonl = True
-        ev_type = str(obj.get("type") or "")
-        if ev_type:
-            event_types.append(ev_type)
-        data = obj.get("data") if isinstance(obj.get("data"), dict) else obj
-
-        if ev_type in ("assistant.message", "message") or (
-            isinstance(data, dict) and isinstance(data.get("content"), str) and ev_type not in ("user.message", "tool.execution_start", "tool.execution_complete")
-        ):
-            content = data.get("content")
-            if isinstance(content, str) and content.strip():
-                messages.append(content)
-                if isinstance(data, dict) and data.get("phase") == "final_answer":
-                    final_answers.append(content)
-        elif isinstance(obj.get("result"), str) and obj["result"].strip():
-            messages.append(obj["result"])
-
-        if isinstance(obj.get("usage"), dict):
-            u = obj["usage"]
-            input_tokens = u.get("input_tokens", u.get("inputTokens", input_tokens))
-            output_tokens = u.get("output_tokens", u.get("outputTokens", output_tokens))
-            if "premiumRequests" in u:
-                premium_requests = u["premiumRequests"]
-        if "total_cost_usd" in obj and isinstance(obj["total_cost_usd"], (int, float)):
-            cost_usd = obj["total_cost_usd"]
-        if isinstance(data, dict) and "ai_credits" in data:
-            provider_specific["ai_credits"] = data["ai_credits"]
-        if isinstance(data, dict) and "totalPremiumRequests" in data and premium_requests == "UNKNOWN":
-            premium_requests = data["totalPremiumRequests"]
-
+    try:
+        text, meta = decode_copilot_jsonl(stdout)
+    except ProviderResponseError as exc:
+        raise ProviderBlockedError(str(exc)) from exc
     usage = make_usage_record(
-        cost_usd=cost_usd,
-        premium_requests=premium_requests,
+        cost_usd=meta["cost_usd"],
+        premium_requests=meta["premium_requests"],
         request_count=1,
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        provider_specific_usage=provider_specific,
-        measurement_availability="provider_reported" if (premium_requests != "UNKNOWN" or input_tokens != "UNKNOWN") else "UNKNOWN",
-        provenance="copilot-cli-jsonl",
+        input_tokens=meta["input_tokens"],
+        output_tokens=meta["output_tokens"],
+        provider_specific_usage=meta["provider_specific_usage"],
+        wall_time_seconds=wall_time_seconds,
+        measurement_availability=meta["measurement_availability"],
+        provenance=meta["provenance"],
     )
-
-    candidates = final_answers if final_answers else messages
-    if candidates:
-        for msg in reversed(candidates):
-            try:
-                parse_provider_json(msg, "copilot-cli")
-                return msg, usage
-            except ProviderBlockedError:
-                continue
-        return candidates[-1], usage
-    if parsed_any_jsonl:
-        raise ProviderBlockedError(
-            f"copilot-cli JSONL stream contained no assistant message (events={event_types[:10]})."
-        )
-    return stdout, usage
+    return text, usage
 
 
 MAX_PROVIDER_OUTPUT_BYTES = 2 * 1024 * 1024
@@ -400,37 +314,32 @@ def _run_subscription_cli(
     if not exe:
         raise ProviderBlockedError(f"{exe_name} CLI is not installed on PATH.")
     cmd = build_cli_invocation(provider, exe, prompt)
+    t_sub = time.monotonic()
     rc, stdout, stderr = _run_bounded_subprocess(
         cmd,
         env=sanitized_cli_env(strip_var),
         timeout=timeout,
         provider_label=f"{exe_name} CLI",
     )
+    elapsed_sub = round(time.monotonic() - t_sub, 3)
     if rc != 0:
         err_preview = stderr.strip()[:200] or stdout.strip()[:200]
         raise ProviderBlockedError(f"{exe_name} CLI failed (exit {rc}): {err_preview}")
-    if provider == "copilot-cli":
-        if not stdout.strip():
-            raise ProviderBlockedError(f"copilot CLI returned empty stdout (stderr={stderr.strip()[:200]!r}).")
-        return extract_copilot_jsonl_response(stdout)
     try:
-        data = json.loads(stdout)
-        text = data.get("result") or stdout
-        u_raw = data.get("usage") or {}
-        cost = data.get("total_cost_usd", "UNKNOWN")
-        usage = make_usage_record(
-            cost_usd=cost if isinstance(cost, (int, float)) else "UNKNOWN",
-            premium_requests="UNKNOWN",
-            request_count=1,
-            input_tokens=u_raw.get("input_tokens", "UNKNOWN"),
-            output_tokens=u_raw.get("output_tokens", "UNKNOWN"),
-            provider_specific_usage={"http_attempts": "NOT_OBSERVABLE"},
-            measurement_availability="provider_reported" if (u_raw or isinstance(cost, (int, float))) else "UNKNOWN",
-            provenance=f"{provider}-json",
-        )
-    except json.JSONDecodeError:
-        text = stdout
-        usage = make_usage_record(request_count=1, provider_specific_usage={"http_attempts": "NOT_OBSERVABLE"}, provenance=f"{provider}-raw")
+        text, meta = decode_cli_provider_stdout(provider, stdout, stderr)
+    except ProviderResponseError as exc:
+        raise ProviderBlockedError(str(exc)) from exc
+    usage = make_usage_record(
+        cost_usd=meta["cost_usd"],
+        premium_requests=meta["premium_requests"],
+        request_count=1,
+        input_tokens=meta["input_tokens"],
+        output_tokens=meta["output_tokens"],
+        provider_specific_usage=meta["provider_specific_usage"],
+        wall_time_seconds=elapsed_sub,
+        measurement_availability=meta["measurement_availability"],
+        provenance=meta["provenance"],
+    )
     return text, usage
 
 

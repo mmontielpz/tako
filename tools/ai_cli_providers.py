@@ -7,9 +7,15 @@ Desktop bridge without duplicating provider or authorization logic.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
 import os
+import re
 import shutil
 from typing import Any
+
+
+class ProviderResponseError(RuntimeError):
+    """Raised when a provider response cannot be decoded or fails contract checks."""
 
 
 class BudgetExhaustedError(RuntimeError):
@@ -205,7 +211,7 @@ def build_cli_invocation(provider: str, exe: str, prompt: str) -> list[str]:
     if provider == "agy-cli":
         return [exe, "-p", prompt, "--output-format", "json"]
     if provider == "codex-cli":
-        return [exe, "exec", prompt]
+        return [exe, "exec", "--sandbox", "read-only", "--skip-git-repo-check", prompt]
     if provider == "claude-cli":
         return [exe, "-p", prompt, "--output-format", "json"]
     if provider == "copilot-cli":
@@ -265,3 +271,169 @@ def sanitized_cli_env(strip_var: str | None = None, *, allow_key_env: str | None
     if allow_key_env and allow_key_env in os.environ:
         env[allow_key_env] = os.environ[allow_key_env]
     return env
+
+
+def parse_structured_json_response(raw: str, provider: str) -> dict[str, Any]:
+    """Extract a single unambiguous JSON object from raw provider output."""
+    text = raw.strip()
+    if not text:
+        raise ProviderResponseError(f"{provider} returned an empty response (0 bytes after stripping).")
+
+    candidates: list[str] = [text]
+    for fence_match in re.finditer(r"```(?:json)?\s*\n(.*?)```", text, flags=re.DOTALL | re.IGNORECASE):
+        candidates.append(fence_match.group(1).strip())
+
+    decoder = json.JSONDecoder()
+    for cand in candidates:
+        try:
+            parsed = json.loads(cand)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+        found: list[dict[str, Any]] = []
+        idx = cand.find("{")
+        while idx != -1:
+            try:
+                parsed, end_idx = decoder.raw_decode(cand, idx)
+                if isinstance(parsed, dict):
+                    found.append(parsed)
+                    idx = cand.find("{", end_idx)
+                    continue
+            except json.JSONDecodeError:
+                pass
+            idx = cand.find("{", idx + 1)
+        if len(found) > 1:
+            raise ProviderResponseError(f"{provider} returned multiple competing JSON objects ({len(found)}).")
+        if len(found) == 1:
+            return found[0]
+
+    preview = text[:160].replace("\n", " ")
+    raise ProviderResponseError(f"{provider} returned invalid JSON (no JSON object found; preview={preview!r}).")
+
+
+def unwrap_provider_envelope(data: dict[str, Any]) -> str | None:
+    """Extract assistant payload text from known CLI JSON envelopes (result, response, content, text, output)."""
+    for key in ("result", "response", "text", "content", "output"):
+        val = data.get(key)
+        if isinstance(val, str) and val.strip():
+            return val
+        if isinstance(val, dict):
+            return json.dumps(val, ensure_ascii=False)
+    return None
+
+
+def decode_copilot_jsonl(stdout: str) -> tuple[str, dict[str, Any]]:
+    """Decode GitHub Copilot CLI --output-format json (JSONL) into assistant text and usage metadata."""
+    input_tokens: int | str = "UNKNOWN"
+    output_tokens: int | str = "UNKNOWN"
+    premium_requests: int | str = "UNKNOWN"
+    cost_usd: float | str = "UNKNOWN"
+    provider_specific: dict[str, Any] = {}
+    messages: list[str] = []
+    final_answers: list[str] = []
+    event_types: list[str] = []
+    parsed_any_jsonl = False
+
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        parsed_any_jsonl = True
+        ev_type = str(obj.get("type") or "")
+        if ev_type:
+            event_types.append(ev_type)
+        data = obj.get("data") if isinstance(obj.get("data"), dict) else obj
+
+        if ev_type in ("assistant.message", "message") or (
+            isinstance(data, dict)
+            and isinstance(data.get("content"), str)
+            and ev_type not in ("user.message", "tool.execution_start", "tool.execution_complete")
+        ):
+            content = data.get("content")
+            if isinstance(content, str) and content.strip():
+                messages.append(content)
+                if isinstance(data, dict) and data.get("phase") == "final_answer":
+                    final_answers.append(content)
+        elif isinstance(obj.get("result"), str) and obj["result"].strip():
+            messages.append(obj["result"])
+
+        if isinstance(obj.get("usage"), dict):
+            u = obj["usage"]
+            input_tokens = u.get("input_tokens", u.get("inputTokens", input_tokens))
+            output_tokens = u.get("output_tokens", u.get("outputTokens", output_tokens))
+            if "premiumRequests" in u:
+                premium_requests = u["premiumRequests"]
+        if "total_cost_usd" in obj and isinstance(obj["total_cost_usd"], (int, float)):
+            cost_usd = obj["total_cost_usd"]
+        if isinstance(data, dict) and "ai_credits" in data:
+            provider_specific["ai_credits"] = data["ai_credits"]
+        if isinstance(data, dict) and "totalPremiumRequests" in data and premium_requests == "UNKNOWN":
+            premium_requests = data["totalPremiumRequests"]
+
+    usage_meta = {
+        "cost_usd": cost_usd,
+        "premium_requests": premium_requests,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "provider_specific_usage": provider_specific,
+        "measurement_availability": "provider_reported" if (premium_requests != "UNKNOWN" or input_tokens != "UNKNOWN") else "UNKNOWN",
+        "provenance": "copilot-cli-jsonl",
+    }
+
+    candidates = final_answers if final_answers else messages
+    if candidates:
+        for msg in reversed(candidates):
+            try:
+                parse_structured_json_response(msg, "copilot-cli")
+                return msg, usage_meta
+            except ProviderResponseError:
+                continue
+        return candidates[-1], usage_meta
+    if parsed_any_jsonl:
+        raise ProviderResponseError(
+            f"copilot-cli JSONL stream contained no assistant message (events={event_types[:10]})."
+        )
+    return stdout, usage_meta
+
+
+def decode_cli_provider_stdout(provider: str, stdout: str, stderr: str = "") -> tuple[str, dict[str, Any]]:
+    """Decode CLI stdout into (assistant_text, raw_usage_meta) for all supported CLI providers."""
+    if provider == "copilot-cli":
+        if not stdout.strip():
+            raise ProviderResponseError(f"copilot CLI returned empty stdout (stderr={stderr.strip()[:200]!r}).")
+        return decode_copilot_jsonl(stdout)
+    try:
+        data = json.loads(stdout)
+        if isinstance(data, dict):
+            unwrapped = unwrap_provider_envelope(data)
+            text = unwrapped if unwrapped is not None else stdout
+            u_raw = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+            cost = data.get("total_cost_usd", "UNKNOWN")
+            usage_meta = {
+                "cost_usd": cost if isinstance(cost, (int, float)) else "UNKNOWN",
+                "premium_requests": "UNKNOWN",
+                "input_tokens": u_raw.get("input_tokens", "UNKNOWN"),
+                "output_tokens": u_raw.get("output_tokens", "UNKNOWN"),
+                "provider_specific_usage": {"http_attempts": "NOT_OBSERVABLE"},
+                "measurement_availability": "provider_reported" if (u_raw or isinstance(cost, (int, float))) else "UNKNOWN",
+                "provenance": f"{provider}-json",
+            }
+            return text, usage_meta
+    except json.JSONDecodeError:
+        pass
+    return stdout, {
+        "cost_usd": "UNKNOWN",
+        "premium_requests": "UNKNOWN",
+        "input_tokens": "UNKNOWN",
+        "output_tokens": "UNKNOWN",
+        "provider_specific_usage": {"http_attempts": "NOT_OBSERVABLE"},
+        "measurement_availability": "UNKNOWN",
+        "provenance": f"{provider}-raw",
+    }

@@ -16,6 +16,7 @@ from tools.ai_cli_providers import (
     sanitized_cli_env,
 )
 from tools.sota_ai_native import workflow
+from tools.sota_extraction import extract_structured_with_cli
 
 
 class TestM029D4SecurityAndBudgets(unittest.TestCase):
@@ -130,3 +131,48 @@ class TestM029D4SecurityAndBudgets(unittest.TestCase):
         self.assertFalse(ok)
         ok_cli, _ = authorize_provider_execution("claude-cli", allow_cli_session=False, allow_paid_api=False)
         self.assertFalse(ok_cli)
+
+
+class TestM029D4ProviderNormalizationAndTelemetry(unittest.TestCase):
+    def test_codex_invocation_uses_read_only_sandbox_and_skip_git_check(self) -> None:
+        cmd = build_cli_invocation("codex-cli", "/usr/bin/codex", "hello")
+        self.assertEqual(cmd, ["/usr/bin/codex", "exec", "--sandbox", "read-only", "--skip-git-repo-check", "hello"])
+
+    def test_agy_envelope_unwrapped_and_wall_time_measured(self) -> None:
+        agy_stdout = json.dumps({"response": json.dumps({"papers": [{"Title": "EdgeSegNet"}]}), "usage": {"input_tokens": 10, "output_tokens": 20}})
+        with mock.patch("tools.sota_ai_native.workflow.shutil.which", return_value="/usr/bin/agy"), \
+             mock.patch("tools.sota_ai_native.workflow._run_bounded_subprocess", return_value=(0, agy_stdout, "")):
+            payload, usage = workflow.run_role("analyst", "p", "agy-cli", "", False, None, allow_cli_session=True)
+            self.assertEqual(payload["papers"][0]["Title"], "EdgeSegNet")
+            self.assertGreaterEqual(usage["wall_time_seconds"], 0.0)
+            self.assertEqual(usage["input_tokens"], 10)
+
+    def test_extract_structured_with_cli_handles_copilot_jsonl_and_codex_markdown(self) -> None:
+        rec = {"title": "EdgeSegNet", "abstract": "Dual-branch CNN achieves 78.4% mIoU on Cityscapes val."}
+        copilot_jsonl = (
+            '{"type":"assistant.message","data":{"content":"{\\"architecture\\":\\"Dual-branch CNN\\"}"}}\n'
+            '{"type":"result","usage":{"premiumRequests":1}}\n'
+        )
+        with mock.patch("tools.sota_extraction.shutil.which", return_value="/usr/bin/copilot"), \
+             mock.patch("tools.sota_extraction.subprocess.run", return_value=mock.Mock(returncode=0, stdout=copilot_jsonl, stderr="")):
+            res = extract_structured_with_cli(rec, provider="copilot-cli", allow_cli_session=True)
+            self.assertEqual(res["fields"]["architecture"], "Dual-branch CNN")
+
+        codex_md = 'Here is the extraction:\n```json\n{"methodology": "Gated attention refinement"}\n```'
+        with mock.patch("tools.sota_extraction.shutil.which", return_value="/usr/bin/codex"), \
+             mock.patch("tools.sota_extraction.subprocess.run", return_value=mock.Mock(returncode=0, stdout=codex_md, stderr="")):
+            res2 = extract_structured_with_cli(rec, provider="codex-cli", allow_cli_session=True)
+            self.assertEqual(res2["fields"]["methodology"], "Gated attention refinement")
+
+    def test_extract_structured_with_cli_rejects_competing_json_and_exhausted_budget(self) -> None:
+        rec = {"title": "EdgeSegNet", "abstract": "Some abstract."}
+        competing = '{"architecture": "A"} {"architecture": "B"}'
+        with mock.patch("tools.sota_extraction.shutil.which", return_value="/usr/bin/codex"), \
+             mock.patch("tools.sota_extraction.subprocess.run", return_value=mock.Mock(returncode=0, stdout=competing, stderr="")):
+            with self.assertRaises(Exception):
+                extract_structured_with_cli(rec, provider="codex-cli", allow_cli_session=True)
+
+        b0 = ProviderCallBudget(max_calls=0)
+        with mock.patch("tools.sota_extraction.shutil.which", return_value="/usr/bin/claude"):
+            with self.assertRaises(BudgetExhaustedError):
+                extract_structured_with_cli(rec, provider="claude-cli", allow_cli_session=True, budget=b0)
