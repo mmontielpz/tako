@@ -129,10 +129,13 @@ describe("SotaWorkspacePanel vertical slice", () => {
     });
 
     const backend: Backend = { call: call as Backend["call"] };
-    ui = mount(<SotaWorkspacePanel backend={backend} pollMs={20} onBackToEngineering={() => {}} />);
+    ui = mount(<SotaWorkspacePanel backend={backend} pollMs={20} />);
 
     await waitFor("runtime ready", () => text("sota-runtime-status").includes("0.1.0a3"));
     expect(q("sota-offline-banner")).toBeTruthy();
+    expect(q("research-mate")).toBeTruthy();
+    expect(q("sota-settings-disclosure")).toBeTruthy();
+    expect(text("research-mate-headline")).toContain("Ready to start research");
 
     await type("sota-ws-path", "/tmp/ws");
     await click("sota-ws-init");

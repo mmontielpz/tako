@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { BridgeError, type Backend } from "./backend";
+import { researchCompanionFor } from "./companion";
+import { Tako } from "./pixel";
 import {
   pythonSotaBridge,
   type SotaIpcResponse,
@@ -11,7 +13,9 @@ import {
 export interface SotaWorkspacePanelProps {
   backend: Backend;
   pollMs?: number;
-  onBackToEngineering(): void;
+  initialWorkspacePath?: string;
+  initialTopic?: string;
+  initialObjective?: string;
 }
 
 function asRecord(v: unknown): Record<string, unknown> {
@@ -21,7 +25,9 @@ function asRecord(v: unknown): Record<string, unknown> {
 export function SotaWorkspacePanel({
   backend,
   pollMs = 400,
-  onBackToEngineering,
+  initialWorkspacePath = "",
+  initialTopic = "State of the Art Survey",
+  initialObjective = "Identify foundational works and evidence",
 }: SotaWorkspacePanelProps) {
   const sota = useRef(pythonSotaBridge(backend)).current;
 
@@ -29,15 +35,16 @@ export function SotaWorkspacePanel({
   const [runtimeInfo, setRuntimeInfo] = useState<SotaRuntimeInfo | null>(null);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
 
-  const [wsPath, setWsPath] = useState("");
-  const [topic, setTopic] = useState("Edge AI Segmentation");
-  const [objective, setObjective] = useState("Survey latency and accuracy trade-offs");
+  const [wsPath, setWsPath] = useState(initialWorkspacePath);
+  const [topic, setTopic] = useState(initialTopic);
+  const [objective, setObjective] = useState(initialObjective);
   const [scope, setScope] = useState("");
   const [wsStatus, setWsStatus] = useState<SotaIpcResponse | null>(null);
 
   const [fixturePath, setFixturePath] = useState("");
   const [iterative, setIterative] = useState(true);
   const [withReviewer, setWithReviewer] = useState(true);
+  const [timeoutMs, setTimeoutMs] = useState("");
 
   const [job, setJob] = useState<SotaJobView | null>(null);
   const [events, setEvents] = useState<SotaWorkflowEvent[]>([]);
@@ -50,6 +57,8 @@ export function SotaWorkspacePanel({
   const [error, setError] = useState<string | null>(null);
 
   const rtOpt = runtimeExe.trim() ? runtimeExe.trim() : undefined;
+  const parsedTimeout = Number.parseInt(timeoutMs, 10);
+  const timeoutOpt = Number.isFinite(parsedTimeout) && parsedTimeout >= 50 ? parsedTimeout : undefined;
 
   async function checkRuntime() {
     setBusy(true);
@@ -64,10 +73,6 @@ export function SotaWorkspacePanel({
       setBusy(false);
     }
   }
-
-  useEffect(() => {
-    void checkRuntime();
-  }, []);
 
   async function refreshWorkspace(pathOverride?: string) {
     const target = (pathOverride ?? wsPath).trim();
@@ -84,6 +89,15 @@ export function SotaWorkspacePanel({
       setEvents([]);
     }
   }
+
+  useEffect(() => {
+    void checkRuntime();
+    if (initialWorkspacePath.trim()) {
+      void refreshWorkspace(initialWorkspacePath).catch((e) => {
+        setError(e instanceof BridgeError ? `${e.code}: ${e.message}` : String(e));
+      });
+    }
+  }, []);
 
   async function initWorkspace() {
     setBusy(true);
@@ -139,6 +153,7 @@ export function SotaWorkspacePanel({
         with_reviewer: kind === "ai_native" ? withReviewer : false,
         force: true,
         runtime_executable: rtOpt,
+        timeout_ms: timeoutOpt,
       });
       setJob(res.data);
       setExportFromDir(kind === "discovery" ? "sota_output" : "sota_ai_native_output");
@@ -212,6 +227,7 @@ export function SotaWorkspacePanel({
   const jobSci = asRecord(job?.scientific_status);
   const jobResult = asRecord(job?.result);
 
+  const researchId = typeof wsData.research_id === "string" ? wsData.research_id : null;
   const acceptedCount =
     typeof jobSci.accepted === "number"
       ? jobSci.accepted
@@ -236,56 +252,32 @@ export function SotaWorkspacePanel({
     ? (exportInventory.artifacts as Record<string, unknown>[])
     : [];
 
+  const mate = researchCompanionFor({
+    hasWorkspace: Boolean(researchId),
+    workspaceId: researchId,
+    topic,
+    objective,
+    jobStatus: job?.status ?? null,
+    acceptedCount,
+    candidateCount,
+    evidenceSufficient,
+    eventCount: events.length,
+    exportedCount: exportedArtifacts.length,
+    error: error ?? runtimeError ?? (job?.error ? `${job.error.code}: ${job.error.message}` : null),
+  });
+
   return (
     <div class="shell" data-testid="sota-workspace-shell">
       <aside class="sidebar" aria-label="Research Workspace">
-        <h1 class="brand">TAKO</h1>
-        <div class="row" style={{ marginBottom: "10px" }}>
-          <button
-            class="secondary"
-            data-testid="back-to-engineering"
-            onClick={onBackToEngineering}
-          >
-            Engineering
-          </button>
-          <span class="chip">Research (Offline)</span>
-        </div>
-
-        <div class="card" data-testid="sota-runtime-card">
-          <strong style={{ fontSize: "12px" }}>Python Runtime (Isolated &gt;= 0.1.0a3)</strong>
-          <label class="field" style={{ marginTop: "6px" }}>
-            <span>Executable override (optional)</span>
-            <input
-              data-testid="sota-runtime-input"
-              value={runtimeExe}
-              placeholder="Defaults to TAKO_PYTHON_CLI_BIN"
-              onInput={(e) => setRuntimeExe((e.target as HTMLInputElement).value)}
-            />
-          </label>
-          <button
-            class="secondary"
-            data-testid="sota-check-runtime"
-            disabled={busy}
-            onClick={() => void checkRuntime()}
-          >
-            Check runtime
-          </button>
-          {runtimeInfo && (
-            <p class="muted" data-testid="sota-runtime-status" role="status">
-              Ready: {runtimeInfo.version} ({runtimeInfo.source}) — {runtimeInfo.executable}
-            </p>
-          )}
-          {runtimeError && (
-            <p class="error" data-testid="sota-runtime-error" role="alert">
-              {runtimeError}
-            </p>
-          )}
-        </div>
+        <h1 class="brand" data-testid="research-brand">TAKO</h1>
+        <p class="muted" style={{ fontSize: "12px", marginTop: "-6px", marginBottom: "12px" }}>
+          ARDE · Research Environment
+        </p>
 
         <div class="card" data-testid="sota-workspace-card">
           <strong style={{ fontSize: "12px" }}>Research Workspace</strong>
           <label class="field" style={{ marginTop: "6px" }}>
-            <span>Workspace directory</span>
+            <span>Workspace folder</span>
             <div class="row">
               <input
                 data-testid="sota-ws-path"
@@ -317,30 +309,94 @@ export function SotaWorkspacePanel({
               Open workspace
             </button>
           </div>
-          {typeof wsData.research_id === "string" && (
+          {researchId && (
             <div class="muted" data-testid="sota-ws-identity" style={{ marginTop: "8px", fontSize: "12px" }}>
-              <div>ID: <strong>{wsData.research_id}</strong></div>
+              <div>ID: <strong>{researchId}</strong></div>
               <div>TAKO: {String(wsData.tako_version ?? "unknown")}</div>
               <div>Quality: {String(qualityStatus.verdict ?? "UNKNOWN")}</div>
             </div>
           )}
         </div>
+
+        <details class="card" data-testid="sota-settings-disclosure">
+          <summary style={{ cursor: "pointer", fontSize: "12px", fontWeight: "600" }}>
+            Settings &amp; Runtime
+          </summary>
+          <div style={{ marginTop: "8px" }}>
+            <label class="field">
+              <span>TAKO CLI executable (optional)</span>
+              <input
+                data-testid="sota-runtime-input"
+                value={runtimeExe}
+                placeholder="Defaults to TAKO_PYTHON_CLI_BIN"
+                onInput={(e) => setRuntimeExe((e.target as HTMLInputElement).value)}
+              />
+            </label>
+            <button
+              class="secondary"
+              data-testid="sota-check-runtime"
+              disabled={busy}
+              onClick={() => void checkRuntime()}
+            >
+              Check runtime
+            </button>
+            {runtimeInfo && (
+              <p class="muted" data-testid="sota-runtime-status" role="status">
+                Ready: {runtimeInfo.version} ({runtimeInfo.source}) — {runtimeInfo.executable}
+              </p>
+            )}
+            {runtimeError && (
+              <p class="error" data-testid="sota-runtime-error" role="alert">
+                {runtimeError}
+              </p>
+            )}
+            <label class="field" style={{ marginTop: "8px" }}>
+              <span>Timeout override (ms, optional)</span>
+              <input
+                data-testid="sota-timeout-input"
+                value={timeoutMs}
+                placeholder="60000"
+                onInput={(e) => setTimeoutMs((e.target as HTMLInputElement).value)}
+              />
+            </label>
+            <label style={{ display: "block", marginTop: "6px", fontSize: "12px" }}>
+              <input
+                type="checkbox"
+                checked={iterative}
+                onChange={(e) => setIterative((e.target as HTMLInputElement).checked)}
+              />{" "}
+              Iterative discovery
+            </label>
+            <label style={{ display: "block", marginTop: "4px", fontSize: "12px" }}>
+              <input
+                type="checkbox"
+                checked={withReviewer}
+                onChange={(e) => setWithReviewer((e.target as HTMLInputElement).checked)}
+              />{" "}
+              Include AI-native Reviewer (fixture)
+            </label>
+          </div>
+        </details>
       </aside>
 
       <main class="main">
-        <div class="card" role="note" data-testid="sota-offline-banner">
-          <strong>Offline Fixture Mode Only (M029F.2)</strong> — Live bibliographic discovery, paid APIs,
-          and authenticated AI CLIs are disabled at the Rust bridge boundary.
+        <div class="card row" role="status" data-testid="sota-offline-banner" style={{ justifyContent: "space-between", alignItems: "center" }}>
+          <span>
+            <strong>Offline Fixture Mode</strong> — Live network discovery, paid APIs, and authenticated AI CLIs are disabled.
+          </span>
+          <span class="chip" data-testid="sota-compact-runtime">
+            {runtimeInfo ? `CLI ${runtimeInfo.version}` : runtimeError ? "Runtime missing" : "Checking runtime…"}
+          </span>
         </div>
 
-        {error && (
+        {(error || runtimeError) && (
           <div class="card error" role="alert" data-testid="sota-error">
-            {error}
+            {error ?? runtimeError}
           </div>
         )}
 
         <section class="card" data-testid="sota-config-card">
-          <h2>Research Configuration &amp; Offline Execution</h2>
+          <h2>State of the Art Workflow</h2>
           <label class="field">
             <span>Research topic</span>
             <input
@@ -374,24 +430,6 @@ export function SotaWorkspacePanel({
               onInput={(e) => setFixturePath((e.target as HTMLInputElement).value)}
             />
           </label>
-          <div class="row" style={{ marginBottom: "8px" }}>
-            <label>
-              <input
-                type="checkbox"
-                checked={iterative}
-                onChange={(e) => setIterative((e.target as HTMLInputElement).checked)}
-              />{" "}
-              Iterative discovery
-            </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={withReviewer}
-                onChange={(e) => setWithReviewer((e.target as HTMLInputElement).checked)}
-              />{" "}
-              Include AI-native Reviewer (fixture)
-            </label>
-          </div>
           <div class="row">
             <button
               data-testid="sota-run-discovery"
@@ -530,6 +568,23 @@ export function SotaWorkspacePanel({
           )}
         </section>
       </main>
+
+      <aside class="companion" aria-label="Research Mate" data-testid="research-mate">
+        <div class="tako-row">
+          <Tako pose={mate.pose} />
+          <div>
+            <strong>Research Mate</strong>
+            <div class="muted" style={{ fontSize: "11px" }} data-testid="research-mate-pose">
+              {mate.pose}
+            </div>
+          </div>
+        </div>
+        <h3 data-testid="research-mate-headline">{mate.headline}</h3>
+        <p data-testid="research-mate-detail">{mate.detail}</p>
+        <p class="muted" data-testid="research-mate-next">
+          <strong>Next:</strong> {mate.next}
+        </p>
+      </aside>
     </div>
   );
 }
