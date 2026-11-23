@@ -1,6 +1,6 @@
 # Security Policy
 
-TAKO is an experimental open-source Agentic Research Development Environment (ARDE) CLI (`0.0.1.dev10` on `develop`, hosted at `https://github.com/mmontielpz/tako`). See [Security Limitations](docs/architecture/SECURITY_LIMITATIONS.md) for current trust boundaries and known rollback limitations.
+TAKO is an experimental open-source Agentic Research Development Environment (ARDE) CLI (`0.1.0a2` on `develop`, hosted at `https://github.com/mmontielpz/tako`). See [Security Limitations](docs/architecture/SECURITY_LIMITATIONS.md) for current trust boundaries and known rollback limitations.
 
 ## Reporting a vulnerability
 

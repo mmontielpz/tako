@@ -191,15 +191,20 @@ class HttpRequestTracker:
                                     self.redirects_observed += 1
                                     cur_url = urllib.parse.urljoin(cur_url, loc)
                                     continue
-                            if resp.status == 429:
-                                self.rate_limited_responses += 1
+                            if resp.status in (429, 503):
+                                if resp.status == 429:
+                                    self.rate_limited_responses += 1
                                 self.http_failures += 1
                                 ra = resp.headers.get("Retry-After") if hasattr(resp, "headers") and resp.headers else None
-                                if ra and str(ra).strip().isdigit() and attempt_idx < max_retries:
-                                    wait_ra = min(float(str(ra).strip()), 10.0)
+                                if attempt_idx < max_retries:
+                                    if ra and str(ra).strip().isdigit():
+                                        wait_ra = min(float(str(ra).strip()), 10.0)
+                                    else:
+                                        wait_ra = min(0.5 * (2 ** attempt_idx), 8.0)
                                     self._sleep(wait_ra)
+                                    self.total_pacing_sleep_seconds = round(self.total_pacing_sleep_seconds + wait_ra, 4)
                                     self.retry_after_waits += 1
-                                last_exc = RetrievalError(f"{provider} HTTP 429 rate limited for {cur_url}")
+                                last_exc = RetrievalError(f"{provider} HTTP {resp.status} rate limited/unavailable for {cur_url}")
                                 break
                             if resp.status != 200:
                                 self.http_failures += 1
@@ -215,12 +220,17 @@ class HttpRequestTracker:
                             self.redirects_observed += 1
                             cur_url = urllib.parse.urljoin(cur_url, he.headers["Location"])
                             continue
-                        if he.code == 429:
-                            self.rate_limited_responses += 1
+                        if he.code in (429, 503):
+                            if he.code == 429:
+                                self.rate_limited_responses += 1
                             ra = he.headers.get("Retry-After") if he.headers else None
-                            if ra and str(ra).strip().isdigit() and attempt_idx < max_retries:
-                                wait_ra = min(float(str(ra).strip()), 10.0)
+                            if attempt_idx < max_retries:
+                                if ra and str(ra).strip().isdigit():
+                                    wait_ra = min(float(str(ra).strip()), 10.0)
+                                else:
+                                    wait_ra = min(0.5 * (2 ** attempt_idx), 8.0)
                                 self._sleep(wait_ra)
+                                self.total_pacing_sleep_seconds = round(self.total_pacing_sleep_seconds + wait_ra, 4)
                                 self.retry_after_waits += 1
                         self.http_failures += 1
                         last_exc = he

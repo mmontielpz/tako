@@ -16,7 +16,8 @@ from tools.ai_cli_providers import (
     sanitized_cli_env,
 )
 from tools.sota_ai_native import workflow
-from tools.sota_extraction import extract_structured_with_cli
+from tools.sota_discovery.sota import HttpRequestTracker
+from tools.sota_extraction import extract_structured_deterministic, extract_structured_with_cli
 
 
 class TestM029D4SecurityAndBudgets(unittest.TestCase):
@@ -176,3 +177,54 @@ class TestM029D4ProviderNormalizationAndTelemetry(unittest.TestCase):
         with mock.patch("tools.sota_extraction.shutil.which", return_value="/usr/bin/claude"):
             with self.assertRaises(BudgetExhaustedError):
                 extract_structured_with_cli(rec, provider="claude-cli", allow_cli_session=True, budget=b0)
+
+
+class TestM029D4ScientificIntegrityAndRateLimit(unittest.TestCase):
+    def test_normalize_evidence_level_uses_provenance_not_provider_identity(self) -> None:
+        self.assertEqual(workflow.normalize_evidence_level("abstract-based", "copilot-cli", has_verified_source_text=True), "abstract-based")
+        self.assertEqual(workflow.normalize_evidence_level("abstract-based", "claude-cli", has_verified_source_text=True), "abstract-based")
+        self.assertTrue(workflow.normalize_evidence_level("abstract-based", "copilot-cli", has_verified_source_text=False).startswith("MODEL_RECALL"))
+
+    def test_deterministic_abstention_on_synthetic_abstract(self) -> None:
+        rec = {
+            "title": "EdgeSegNet",
+            "abstract": "Evaluated on Cityscapes val using TensorRT FP16, EdgeSegNet achieves 78.4% mIoU at 62.5 FPS. On CamVid test, it reaches 76.1% mIoU at 94.0 FPS.",
+        }
+        out = extract_structured_deterministic(rec)
+        self.assertEqual(out["evidence_type"], "ABSTRACT_BASED")
+        self.assertIn("training_details", out["missing_information"])
+        self.assertEqual(out["fields"]["training_details"], "NOT_AVAILABLE")
+
+    def test_http_429_and_503_bounded_backoff_counts_toward_budget(self) -> None:
+        sleeps: list[float] = []
+        tracker = HttpRequestTracker(max_http_requests=5, min_interval_seconds=0.0, sleep_fn=sleeps.append)
+        calls = {"n": 0}
+
+        class _FakeResp:
+            def __init__(self, status: int, body: str = '{"ok": true}') -> None:
+                self.status = status
+                self._body = body.encode("utf-8")
+                self.headers = {}
+
+            def read(self) -> bytes:
+                return self._body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        def fake_open(req, timeout=15.0):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return _FakeResp(429)
+            if calls["n"] == 2:
+                return _FakeResp(503)
+            return _FakeResp(200)
+
+        res = tracker.get_json("https://api.openalex.org/works", max_retries=2, open_fn=fake_open, provider="openalex")
+        self.assertEqual(res, {"ok": True})
+        self.assertEqual(tracker.http_attempts, 3)
+        self.assertEqual(tracker.rate_limited_responses, 1)
+        self.assertEqual(len(sleeps), 2)

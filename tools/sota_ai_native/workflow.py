@@ -122,14 +122,10 @@ VALID_EVIDENCE_LEVELS = {
 }
 
 
-def normalize_evidence_level(raw_level: Any, provider: str) -> str:
+def normalize_evidence_level(raw_level: Any, provider: str, *, has_verified_source_text: bool = False) -> str:
+    """Normalize evidence level uniformly by provenance rather than provider identity."""
     label = str(raw_level or "").strip()
     low = label.lower()
-    if provider == "copilot-cli":
-        # Copilot CLI recall outputs lack retrieved abstract/full-text provenance in TAKO.
-        if low in ("", "model-recall", "model_recall"):
-            return "MODEL_RECALL"
-        return f"MODEL_RECALL (clamped_from={label!r})"
     if low in VALID_EVIDENCE_LEVELS:
         if low == "not_verified":
             return "NOT_VERIFIED"
@@ -137,7 +133,7 @@ def normalize_evidence_level(raw_level: Any, provider: str) -> str:
             return "UNKNOWN"
         if low in ("model-recall", "model_recall"):
             return "MODEL_RECALL"
-        if low in ("abstract-based", "full-text") and provider != "fixture":
+        if low in ("abstract-based", "full-text") and provider != "fixture" and not has_verified_source_text:
             # Without verified retrieved text correspondence, do not promote recall to abstract/full-text.
             return f"MODEL_RECALL (unbacked_claim={label!r})"
         return low
