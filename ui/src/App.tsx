@@ -4,6 +4,7 @@ import { BridgeError, type Backend } from "./backend";
 import { companionFor } from "./companion";
 import { Tako } from "./pixel";
 import { Proposals } from "./Proposals";
+import { SotaWorkspacePanel } from "./SotaWorkspacePanel";
 import type { ActionId, MissionView, ProjectView, StartupReport, BackendStatus, RegisteredProject, BackendGovernanceResponse, BackendEvidenceView, IntegrationView } from "./types";
 
 const STAGES = ["Goal", "Plan", "Run", "Verify", "Decide"] as const;
@@ -50,6 +51,7 @@ export function App({ backend, pollMs = 500 }: AppProps) {
   const [remoteEvidence, setRemoteEvidence] = useState<BackendEvidenceView | null>(null);
   const [error, setError] = useState<BridgeError | null>(null);
   const [pending, setPending] = useState(false);
+  const [workspaceMode, setWorkspaceMode] = useState<"engineering" | "research">("engineering");
   const lock = useRef(false);
 
   // goal form
@@ -277,10 +279,30 @@ export function App({ backend, pollMs = 500 }: AppProps) {
 
   const isBackendProject = pv?.source === "t_backend";
 
+  if (workspaceMode === "research") {
+    return (
+      <SotaWorkspacePanel
+        backend={backend}
+        pollMs={pollMs}
+        onBackToEngineering={() => setWorkspaceMode("engineering")}
+      />
+    );
+  }
+
   return (
     <div class="shell">
       <aside class="sidebar" aria-label="Projects">
         <h1 class="brand">TAKO</h1>
+        <div class="row" style={{ marginBottom: "10px" }}>
+          <span class="chip">Engineering</span>
+          <button
+            class="secondary"
+            data-testid="open-research-workspace"
+            onClick={() => setWorkspaceMode("research")}
+          >
+            Research (SOTA)
+          </button>
+        </div>
         <div class="backend-status-bar" data-testid="backend-status-bar" style={{ marginBottom: "12px" }}>
           <span class="chip" data-testid="core-mode">Local standalone core</span>
           <div data-testid="backend-status">

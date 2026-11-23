@@ -4,13 +4,17 @@ import type { Backend } from "./backend";
 export type SotaContractVersion = "tako-sota-ipc/v1";
 
 export type SotaExecutionStatus =
+  | "running"
   | "succeeded"
   | "insufficient_evidence"
   | "failed"
+  | "cancelled"
+  | "timed_out"
   | "interrupted"
   | "unauthorized"
   | "missing_runtime"
   | "incompatible_runtime"
+  | "untrusted_runtime"
   | "invalid_response";
 
 export interface SotaRuntimeInfo {
@@ -121,6 +125,43 @@ export interface SotaReadEventsData {
   events: SotaWorkflowEvent[];
 }
 
+export interface SotaStartJobArgs {
+  kind: "discovery" | "ai_native";
+  workspace_path: string;
+  fixture_path?: string;
+  provider?: "fixture";
+  topic?: string;
+  objective?: string;
+  iterative?: boolean;
+  max_papers?: number;
+  max_rounds?: number;
+  max_requests?: number;
+  with_reviewer?: boolean;
+  out_dir?: string;
+  force?: boolean;
+  runtime_executable?: string;
+  timeout_ms?: number;
+  max_output_bytes?: number;
+}
+
+export interface SotaJobIdArgs {
+  job_id: string;
+}
+
+export interface SotaJobView {
+  job_id: string;
+  kind: "discovery" | "ai_native";
+  workspace_path: string;
+  status: string;
+  pid: number | null;
+  runtime: SotaRuntimeInfo;
+  exit_code: number | null;
+  execution_status: SotaExecutionStatus;
+  scientific_status: Record<string, unknown> | null;
+  result: Record<string, unknown> | null;
+  error: { code: string; message: string; details: string[] } | null;
+}
+
 export interface SotaCommands {
   sota_resolve_runtime: [SotaResolveRuntimeArgs | undefined, SotaIpcResponse<SotaRuntimeInfo & { offline_only: boolean }>];
   sota_ws_init: [SotaWsInitArgs, SotaIpcResponse];
@@ -129,6 +170,9 @@ export interface SotaCommands {
   sota_run_ai_native: [SotaRunAiNativeArgs, SotaIpcResponse];
   sota_read_events: [SotaReadEventsArgs, SotaIpcResponse<SotaReadEventsData>];
   sota_export: [SotaExportArgs, SotaIpcResponse];
+  sota_start_job: [SotaStartJobArgs, SotaIpcResponse<SotaJobView>];
+  sota_job_status: [SotaJobIdArgs, SotaIpcResponse<SotaJobView>];
+  sota_cancel: [SotaJobIdArgs, SotaIpcResponse<SotaJobView>];
 }
 
 export function pythonSotaBridge(backend: Backend) {
@@ -140,5 +184,8 @@ export function pythonSotaBridge(backend: Backend) {
     runAiNative: (args: SotaRunAiNativeArgs) => backend.call("sota_run_ai_native", args),
     readEvents: (args: SotaReadEventsArgs) => backend.call("sota_read_events", args),
     exportArtifacts: (args: SotaExportArgs) => backend.call("sota_export", args),
+    startJob: (args: SotaStartJobArgs) => backend.call("sota_start_job", args),
+    jobStatus: (args: SotaJobIdArgs) => backend.call("sota_job_status", args),
+    cancelJob: (args: SotaJobIdArgs) => backend.call("sota_cancel", args),
   };
 }

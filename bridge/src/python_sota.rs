@@ -7,12 +7,15 @@
 use crate::BridgeError;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::fs;
 use std::io::Read;
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -33,18 +36,34 @@ pub fn handles(cmd: &str) -> bool {
             | "sota_run_ai_native"
             | "sota_read_events"
             | "sota_export"
+            | "sota_start_job"
+            | "sota_job_status"
+            | "sota_cancel"
     )
 }
 
-pub fn dispatch(cmd: &str, args: Value) -> Result<Value, BridgeError> {
+pub fn dispatch(jobs: &Arc<SotaJobManager>, cmd: &str, args: Value) -> Result<Value, BridgeError> {
     match cmd {
         "sota_resolve_runtime" => resolve_runtime_cmd(parse(args)?),
         "sota_ws_init" => ws_init_cmd(parse(args)?),
         "sota_ws_status" => ws_status_cmd(parse(args)?),
-        "sota_run_discovery" => run_discovery_cmd(parse(args)?),
-        "sota_run_ai_native" => run_ai_native_cmd(parse(args)?),
+        "sota_run_discovery" => {
+            let a: RunDiscoveryArgs = parse(args)?;
+            let ws = validate_workspace_root(&a.workspace_path, true)?;
+            jobs.ensure_workspace_idle(&ws)?;
+            run_discovery_cmd(a)
+        }
+        "sota_run_ai_native" => {
+            let a: RunAiNativeArgs = parse(args)?;
+            let ws = validate_workspace_root(&a.workspace_path, true)?;
+            jobs.ensure_workspace_idle(&ws)?;
+            run_ai_native_cmd(a)
+        }
         "sota_read_events" => read_events_cmd(parse(args)?),
         "sota_export" => export_cmd(parse(args)?),
+        "sota_start_job" => start_job_cmd(jobs, parse(args)?),
+        "sota_job_status" => job_status_cmd(jobs, parse(args)?),
+        "sota_cancel" => cancel_job_cmd(jobs, parse(args)?),
         _ => Err(BridgeError::new(
             "unknown_command",
             format!("unknown python SOTA command: {cmd}"),
@@ -211,6 +230,340 @@ pub struct SotaIpcResponse {
     pub data: Value,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StartJobArgs {
+    pub kind: String,
+    pub workspace_path: String,
+    #[serde(default)]
+    pub fixture_path: Option<String>,
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub topic: Option<String>,
+    #[serde(default)]
+    pub objective: Option<String>,
+    #[serde(default)]
+    pub iterative: bool,
+    #[serde(default)]
+    pub max_papers: Option<u32>,
+    #[serde(default)]
+    pub max_rounds: Option<u32>,
+    #[serde(default)]
+    pub max_requests: Option<u32>,
+    #[serde(default)]
+    pub with_reviewer: bool,
+    #[serde(default)]
+    pub allow_cli_session: bool,
+    #[serde(default)]
+    pub allow_paid_api: bool,
+    #[serde(default)]
+    pub allow_unisolated_cli: bool,
+    #[serde(default)]
+    pub verify_bib: bool,
+    #[serde(default)]
+    pub out_dir: Option<String>,
+    #[serde(default)]
+    pub force: bool,
+    #[serde(default)]
+    pub runtime_executable: Option<String>,
+    #[serde(default)]
+    pub timeout_ms: Option<u64>,
+    #[serde(default)]
+    pub max_output_bytes: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct JobIdArgs {
+    pub job_id: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SotaJobView {
+    pub job_id: String,
+    pub kind: String,
+    pub workspace_path: String,
+    pub status: String,
+    pub pid: Option<u32>,
+    pub runtime: RuntimeInfo,
+    pub exit_code: Option<i32>,
+    pub execution_status: String,
+    pub scientific_status: Option<Value>,
+    pub result: Option<Value>,
+    pub error: Option<BridgeError>,
+}
+
+struct ManagedJob {
+    view: Mutex<SotaJobView>,
+    cancel_flag: Arc<AtomicBool>,
+    pid: Arc<Mutex<Option<u32>>>,
+}
+
+#[derive(Default)]
+pub struct SotaJobManager {
+    next_id: AtomicU64,
+    jobs: Mutex<HashMap<String, Arc<ManagedJob>>>,
+}
+
+impl SotaJobManager {
+    pub fn ensure_workspace_idle(&self, ws: &Path) -> Result<(), BridgeError> {
+        let ws_str = ws.to_string_lossy();
+        let guard = self.jobs.lock().unwrap_or_else(|e| e.into_inner());
+        for job in guard.values() {
+            let v = job.view.lock().unwrap_or_else(|e| e.into_inner());
+            if v.workspace_path == ws_str && v.status == "running" {
+                return Err(BridgeError::new(
+                    "busy",
+                    format!(
+                        "Workspace {} already has an active SOTA job ({}).",
+                        v.workspace_path, v.job_id
+                    ),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn kill_all_active(&self) {
+        let active: Vec<Arc<ManagedJob>> = {
+            let guard = self.jobs.lock().unwrap_or_else(|e| e.into_inner());
+            guard.values().cloned().collect()
+        };
+        for job in active {
+            job.cancel_flag.store(true, Ordering::Release);
+            if let Some(pid) = *job.pid.lock().unwrap_or_else(|e| e.into_inner()) {
+                kill_process_group_pid(pid);
+            }
+        }
+    }
+}
+
+impl Drop for SotaJobManager {
+    fn drop(&mut self) {
+        self.kill_all_active();
+    }
+}
+
+fn start_job_cmd(jobs: &Arc<SotaJobManager>, args: StartJobArgs) -> Result<Value, BridgeError> {
+    if !matches!(args.kind.as_str(), "discovery" | "ai_native") {
+        return Err(BridgeError::invalid(format!(
+            "Unsupported SOTA job kind '{}'; expected 'discovery' or 'ai_native'.",
+            args.kind
+        )));
+    }
+    let ws = validate_workspace_root(&args.workspace_path, true)?;
+    let timeout = clamp_timeout(args.timeout_ms, DEFAULT_TIMEOUT_MS);
+    let max_bytes = args.max_output_bytes.unwrap_or(DEFAULT_MAX_OUTPUT_BYTES);
+
+    let (cli_args, runtime) = if args.kind == "discovery" {
+        let disc = RunDiscoveryArgs {
+            workspace_path: args.workspace_path.clone(),
+            fixture_path: args.fixture_path,
+            topic: args.topic,
+            objective: args.objective,
+            iterative: args.iterative,
+            max_papers: args.max_papers,
+            max_rounds: args.max_rounds,
+            max_requests: args.max_requests,
+            out_dir: args.out_dir,
+            force: args.force,
+            runtime_executable: args.runtime_executable,
+            timeout_ms: args.timeout_ms,
+            max_output_bytes: args.max_output_bytes,
+        };
+        prepare_discovery_invocation(&ws, &disc, timeout)?
+    } else {
+        let ai = RunAiNativeArgs {
+            workspace_path: args.workspace_path.clone(),
+            provider: args.provider,
+            fixture_path: args.fixture_path,
+            topic: args.topic,
+            objective: args.objective,
+            max_papers: args.max_papers,
+            with_reviewer: args.with_reviewer,
+            allow_cli_session: args.allow_cli_session,
+            allow_paid_api: args.allow_paid_api,
+            allow_unisolated_cli: args.allow_unisolated_cli,
+            verify_bib: args.verify_bib,
+            out_dir: args.out_dir,
+            force: args.force,
+            runtime_executable: args.runtime_executable,
+            timeout_ms: args.timeout_ms,
+            max_output_bytes: args.max_output_bytes,
+        };
+        prepare_ai_native_invocation(&ws, &ai, timeout)?
+    };
+
+    let job_num = jobs.next_id.fetch_add(1, Ordering::Relaxed) + 1;
+    let job_id = format!("sota-job-{job_num}");
+    let ws_str = ws.to_string_lossy().into_owned();
+    let initial_view = SotaJobView {
+        job_id: job_id.clone(),
+        kind: args.kind.clone(),
+        workspace_path: ws_str.clone(),
+        status: "running".into(),
+        pid: None,
+        runtime: runtime.clone(),
+        exit_code: None,
+        execution_status: "running".into(),
+        scientific_status: None,
+        result: None,
+        error: None,
+    };
+    let managed = Arc::new(ManagedJob {
+        view: Mutex::new(initial_view.clone()),
+        cancel_flag: Arc::new(AtomicBool::new(false)),
+        pid: Arc::new(Mutex::new(None)),
+    });
+
+    {
+        let mut guard = jobs.jobs.lock().unwrap_or_else(|e| e.into_inner());
+        for existing in guard.values() {
+            let v = existing.view.lock().unwrap_or_else(|e| e.into_inner());
+            if v.workspace_path == ws_str && v.status == "running" {
+                return Err(BridgeError::new(
+                    "busy",
+                    format!(
+                        "Workspace {} already has an active SOTA job ({}).",
+                        v.workspace_path, v.job_id
+                    ),
+                ));
+            }
+        }
+        guard.insert(job_id.clone(), Arc::clone(&managed));
+    }
+
+    let managed_bg = Arc::clone(&managed);
+    let kind_bg = args.kind.clone();
+    let exe_bg = runtime.executable.clone();
+    let ws_bg = ws.clone();
+    thread::spawn(move || {
+        let outcome = run_tako_cli_cancellable(
+            &exe_bg,
+            &cli_args,
+            &ws_bg,
+            &ws_bg,
+            timeout,
+            max_bytes,
+            Some(&managed_bg.cancel_flag),
+            Some(&managed_bg.pid),
+        );
+        let mut v = managed_bg.view.lock().unwrap_or_else(|e| e.into_inner());
+        v.pid = *managed_bg.pid.lock().unwrap_or_else(|e| e.into_inner());
+        match outcome {
+            Ok(out) => {
+                v.exit_code = Some(out.exit_code);
+                match parse_json_stdout(&out.stdout) {
+                    Ok(payload) => {
+                        if kind_bg == "discovery" {
+                            let (exec_st, sci) = classify_discovery_result(&payload);
+                            v.status = exec_st.clone();
+                            v.execution_status = exec_st;
+                            v.scientific_status = Some(sci);
+                        } else {
+                            let sci = json!({
+                                "provider": payload.get("provider").cloned().unwrap_or(Value::Null),
+                                "reviewer": payload.get("reviewer").cloned().unwrap_or(Value::Null),
+                                "status": payload.get("status").cloned().unwrap_or(Value::Null),
+                                "offline_fixture": true,
+                            });
+                            v.status = "succeeded".into();
+                            v.execution_status = "succeeded".into();
+                            v.scientific_status = Some(sci);
+                        }
+                        v.result = Some(payload);
+                    }
+                    Err(e) => {
+                        v.status = "failed".into();
+                        v.execution_status = e.code.clone();
+                        v.error = Some(e);
+                    }
+                }
+            }
+            Err(e) => {
+                let term = match e.code.as_str() {
+                    "cancelled" => "cancelled",
+                    "timeout" => "timed_out",
+                    _ => "failed",
+                };
+                v.status = term.into();
+                v.execution_status = e.code.clone();
+                v.error = Some(e);
+            }
+        }
+    });
+
+    to_value(SotaIpcResponse {
+        contract_version: CONTRACT_VERSION,
+        operation: "sota_start_job".into(),
+        workspace_path: Some(ws_str),
+        runtime: Some(runtime),
+        exit_code: None,
+        execution_status: "running".into(),
+        scientific_status: None,
+        data: to_value(initial_view)?,
+    })
+}
+
+fn job_status_cmd(jobs: &Arc<SotaJobManager>, args: JobIdArgs) -> Result<Value, BridgeError> {
+    let job = {
+        let guard = jobs.jobs.lock().unwrap_or_else(|e| e.into_inner());
+        guard.get(&args.job_id).cloned()
+    }
+    .ok_or_else(|| BridgeError::new("not_found", format!("Unknown SOTA job: {}", args.job_id)))?;
+
+    let mut view = job.view.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    if view.pid.is_none() {
+        view.pid = *job.pid.lock().unwrap_or_else(|e| e.into_inner());
+    }
+    to_value(SotaIpcResponse {
+        contract_version: CONTRACT_VERSION,
+        operation: "sota_job_status".into(),
+        workspace_path: Some(view.workspace_path.clone()),
+        runtime: Some(view.runtime.clone()),
+        exit_code: view.exit_code,
+        execution_status: view.execution_status.clone(),
+        scientific_status: view.scientific_status.clone(),
+        data: to_value(view)?,
+    })
+}
+
+fn cancel_job_cmd(jobs: &Arc<SotaJobManager>, args: JobIdArgs) -> Result<Value, BridgeError> {
+    let job = {
+        let guard = jobs.jobs.lock().unwrap_or_else(|e| e.into_inner());
+        guard.get(&args.job_id).cloned()
+    }
+    .ok_or_else(|| BridgeError::new("not_found", format!("Unknown SOTA job: {}", args.job_id)))?;
+
+    let mut view = job.view.lock().unwrap_or_else(|e| e.into_inner());
+    if view.status != "running" {
+        return Err(BridgeError::new(
+            "already_finished",
+            format!("SOTA job {} is already in terminal state '{}'.", view.job_id, view.status),
+        ));
+    }
+    job.cancel_flag.store(true, Ordering::Release);
+    if let Some(pid) = *job.pid.lock().unwrap_or_else(|e| e.into_inner()) {
+        kill_process_group_pid(pid);
+    }
+    view.status = "cancelled".into();
+    view.execution_status = "cancelled".into();
+    let snapshot = view.clone();
+    drop(view);
+
+    to_value(SotaIpcResponse {
+        contract_version: CONTRACT_VERSION,
+        operation: "sota_cancel".into(),
+        workspace_path: Some(snapshot.workspace_path.clone()),
+        runtime: Some(snapshot.runtime.clone()),
+        exit_code: snapshot.exit_code,
+        execution_status: "cancelled".into(),
+        scientific_status: snapshot.scientific_status.clone(),
+        data: to_value(snapshot)?,
+    })
+}
+
 // ---- Command Handlers ----------------------------------------------------------------------
 
 fn resolve_runtime_cmd(args: ResolveRuntimeArgs) -> Result<Value, BridgeError> {
@@ -336,9 +689,11 @@ fn ws_status_cmd(args: WsStatusArgs) -> Result<Value, BridgeError> {
     })
 }
 
-fn run_discovery_cmd(args: RunDiscoveryArgs) -> Result<Value, BridgeError> {
-    let ws = validate_workspace_root(&args.workspace_path, true)?;
-
+fn prepare_discovery_invocation(
+    ws: &Path,
+    args: &RunDiscoveryArgs,
+    timeout: Duration,
+) -> Result<(Vec<String>, RuntimeInfo), BridgeError> {
     // M029F.1 offline boundary: require explicit fixture_path (never live network discovery).
     let Some(raw_fixture) = args.fixture_path.as_deref().filter(|s| !s.trim().is_empty()) else {
         return Err(BridgeError::new(
@@ -347,10 +702,7 @@ fn run_discovery_cmd(args: RunDiscoveryArgs) -> Result<Value, BridgeError> {
         ));
     };
     let fixture = validate_fixture_path(raw_fixture)?;
-
-    let timeout = clamp_timeout(args.timeout_ms, DEFAULT_TIMEOUT_MS);
-    let max_bytes = args.max_output_bytes.unwrap_or(DEFAULT_MAX_OUTPUT_BYTES);
-    let runtime = resolve_and_verify_runtime(args.runtime_executable.as_deref(), timeout)?;
+    let runtime = resolve_and_verify_runtime_for_ws(args.runtime_executable.as_deref(), Some(ws), timeout)?;
 
     let mut cli_args = vec![
         "sota".to_string(),
@@ -360,13 +712,13 @@ fn run_discovery_cmd(args: RunDiscoveryArgs) -> Result<Value, BridgeError> {
         fixture.to_string_lossy().into_owned(),
         "--json".into(),
     ];
-    if let Some(topic) = args.topic.filter(|s| !s.trim().is_empty()) {
+    if let Some(topic) = args.topic.as_deref().filter(|s| !s.trim().is_empty()) {
         cli_args.push("--topic".into());
-        cli_args.push(topic);
+        cli_args.push(topic.to_string());
     }
-    if let Some(obj) = args.objective.filter(|s| !s.trim().is_empty()) {
+    if let Some(obj) = args.objective.as_deref().filter(|s| !s.trim().is_empty()) {
         cli_args.push("--objective".into());
-        cli_args.push(obj);
+        cli_args.push(obj.to_string());
     }
     if args.iterative {
         cli_args.push("--iterative".into());
@@ -384,13 +736,21 @@ fn run_discovery_cmd(args: RunDiscoveryArgs) -> Result<Value, BridgeError> {
         cli_args.push(n.to_string());
     }
     if let Some(rel_out) = args.out_dir.as_deref().filter(|s| !s.trim().is_empty()) {
-        let resolved_out = resolve_workspace_subpath(&ws, rel_out, false)?;
+        let resolved_out = resolve_workspace_subpath(ws, rel_out, false)?;
         cli_args.push("--out-dir".into());
         cli_args.push(resolved_out.to_string_lossy().into_owned());
     }
     if args.force {
         cli_args.push("--force".into());
     }
+    Ok((cli_args, runtime))
+}
+
+fn run_discovery_cmd(args: RunDiscoveryArgs) -> Result<Value, BridgeError> {
+    let ws = validate_workspace_root(&args.workspace_path, true)?;
+    let timeout = clamp_timeout(args.timeout_ms, DEFAULT_TIMEOUT_MS);
+    let max_bytes = args.max_output_bytes.unwrap_or(DEFAULT_MAX_OUTPUT_BYTES);
+    let (cli_args, runtime) = prepare_discovery_invocation(&ws, &args, timeout)?;
 
     let out = run_tako_cli(&runtime.executable, &cli_args, &ws, &ws, timeout, max_bytes)?;
     let payload = parse_json_stdout(&out.stdout)?;
@@ -408,9 +768,11 @@ fn run_discovery_cmd(args: RunDiscoveryArgs) -> Result<Value, BridgeError> {
     })
 }
 
-fn run_ai_native_cmd(args: RunAiNativeArgs) -> Result<Value, BridgeError> {
-    let ws = validate_workspace_root(&args.workspace_path, true)?;
-
+fn prepare_ai_native_invocation(
+    ws: &Path,
+    args: &RunAiNativeArgs,
+    timeout: Duration,
+) -> Result<(Vec<String>, RuntimeInfo), BridgeError> {
     // M029F.1 offline & authorization boundary: fixture provider only, no live/paid/unisolated flags.
     let provider = args.provider.as_deref().unwrap_or("fixture");
     if provider != "fixture" {
@@ -426,9 +788,7 @@ fn run_ai_native_cmd(args: RunAiNativeArgs) -> Result<Value, BridgeError> {
         ));
     }
 
-    let timeout = clamp_timeout(args.timeout_ms, DEFAULT_TIMEOUT_MS);
-    let max_bytes = args.max_output_bytes.unwrap_or(DEFAULT_MAX_OUTPUT_BYTES);
-    let runtime = resolve_and_verify_runtime(args.runtime_executable.as_deref(), timeout)?;
+    let runtime = resolve_and_verify_runtime_for_ws(args.runtime_executable.as_deref(), Some(ws), timeout)?;
 
     let mut cli_args = vec![
         "sota-ai".to_string(),
@@ -443,13 +803,13 @@ fn run_ai_native_cmd(args: RunAiNativeArgs) -> Result<Value, BridgeError> {
         cli_args.push("--fixture".into());
         cli_args.push(fx.to_string_lossy().into_owned());
     }
-    if let Some(topic) = args.topic.filter(|s| !s.trim().is_empty()) {
+    if let Some(topic) = args.topic.as_deref().filter(|s| !s.trim().is_empty()) {
         cli_args.push("--topic".into());
-        cli_args.push(topic);
+        cli_args.push(topic.to_string());
     }
-    if let Some(obj) = args.objective.filter(|s| !s.trim().is_empty()) {
+    if let Some(obj) = args.objective.as_deref().filter(|s| !s.trim().is_empty()) {
         cli_args.push("--objective".into());
-        cli_args.push(obj);
+        cli_args.push(obj.to_string());
     }
     if let Some(n) = args.max_papers {
         cli_args.push("--max-papers".into());
@@ -459,13 +819,21 @@ fn run_ai_native_cmd(args: RunAiNativeArgs) -> Result<Value, BridgeError> {
         cli_args.push("--with-reviewer".into());
     }
     if let Some(rel_out) = args.out_dir.as_deref().filter(|s| !s.trim().is_empty()) {
-        let resolved_out = resolve_workspace_subpath(&ws, rel_out, false)?;
+        let resolved_out = resolve_workspace_subpath(ws, rel_out, false)?;
         cli_args.push("--out-dir".into());
         cli_args.push(resolved_out.to_string_lossy().into_owned());
     }
     if args.force {
         cli_args.push("--force".into());
     }
+    Ok((cli_args, runtime))
+}
+
+fn run_ai_native_cmd(args: RunAiNativeArgs) -> Result<Value, BridgeError> {
+    let ws = validate_workspace_root(&args.workspace_path, true)?;
+    let timeout = clamp_timeout(args.timeout_ms, DEFAULT_TIMEOUT_MS);
+    let max_bytes = args.max_output_bytes.unwrap_or(DEFAULT_MAX_OUTPUT_BYTES);
+    let (cli_args, runtime) = prepare_ai_native_invocation(&ws, &args, timeout)?;
 
     let out = run_tako_cli(&runtime.executable, &cli_args, &ws, &ws, timeout, max_bytes)?;
     let payload = parse_json_stdout(&out.stdout)?;
@@ -626,6 +994,14 @@ fn resolve_and_verify_runtime(
     explicit_arg: Option<&str>,
     timeout: Duration,
 ) -> Result<RuntimeInfo, BridgeError> {
+    resolve_and_verify_runtime_for_ws(explicit_arg, None, timeout)
+}
+
+fn resolve_and_verify_runtime_for_ws(
+    explicit_arg: Option<&str>,
+    workspace: Option<&Path>,
+    timeout: Duration,
+) -> Result<RuntimeInfo, BridgeError> {
     let (exe_str, source) = if let Some(raw) = explicit_arg.filter(|s| !s.trim().is_empty()) {
         (raw.to_string(), "explicit_arg".to_string())
     } else if let Ok(env_val) = std::env::var("TAKO_PYTHON_CLI_BIN") {
@@ -654,11 +1030,27 @@ fn resolve_and_verify_runtime(
             format!("Runtime executable must be an absolute path without '..': {exe_str}"),
         ));
     }
-    if !exe_path.is_file() {
-        return Err(BridgeError::new(
+    let meta = fs::symlink_metadata(&exe_path).map_err(|_| {
+        BridgeError::new(
             "missing_runtime",
             format!("TAKO Python CLI executable not found: {exe_str}"),
+        )
+    })?;
+    if meta.file_type().is_symlink() || !meta.is_file() {
+        return Err(BridgeError::new(
+            "untrusted_runtime",
+            format!("Runtime executable must be a regular non-symlink file: {exe_str}"),
         ));
+    }
+    if let Some(ws) = workspace {
+        if let (Ok(canon_exe), Ok(canon_ws)) = (fs::canonicalize(&exe_path), fs::canonicalize(ws)) {
+            if canon_exe.starts_with(&canon_ws) {
+                return Err(BridgeError::new(
+                    "untrusted_runtime",
+                    "Runtime executable must not reside inside a research workspace directory.",
+                ));
+            }
+        }
     }
 
     let check_cwd = std::env::temp_dir();
@@ -886,6 +1278,21 @@ fn clamp_timeout(req_ms: Option<u64>, default_ms: u64) -> Duration {
     Duration::from_millis(ms)
 }
 
+fn kill_process_group_pid(pid: u32) {
+    #[cfg(unix)]
+    unsafe {
+        libc::kill(-(pid as libc::pid_t), libc::SIGKILL);
+    }
+    #[cfg(not(unix))]
+    let _ = pid;
+}
+
+fn kill_and_reap(child: &mut Child) {
+    kill_process_group_pid(child.id());
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
 fn run_tako_cli(
     executable: &str,
     args: &[String],
@@ -893,6 +1300,29 @@ fn run_tako_cli(
     isolated_home: &Path,
     timeout: Duration,
     max_output_bytes: usize,
+) -> Result<CliOutput, BridgeError> {
+    run_tako_cli_cancellable(
+        executable,
+        args,
+        cwd,
+        isolated_home,
+        timeout,
+        max_output_bytes,
+        None,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_tako_cli_cancellable(
+    executable: &str,
+    args: &[String],
+    cwd: &Path,
+    isolated_home: &Path,
+    timeout: Duration,
+    max_output_bytes: usize,
+    cancel_flag: Option<&AtomicBool>,
+    pid_slot: Option<&Arc<Mutex<Option<u32>>>>,
 ) -> Result<CliOutput, BridgeError> {
     let mut cmd = Command::new(executable);
     cmd.args(args)
@@ -909,12 +1339,25 @@ fn run_tako_cli(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
+    #[cfg(unix)]
+    unsafe {
+        cmd.pre_exec(|| {
+            if libc::setpgid(0, 0) != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+
     let mut child = cmd.spawn().map_err(|e| {
         BridgeError::new(
             "missing_runtime",
             format!("Failed to launch TAKO CLI '{executable}': {e}"),
         )
     })?;
+    if let Some(slot) = pid_slot {
+        *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(child.id());
+    }
 
     let stdout_pipe = child
         .stdout
@@ -931,9 +1374,17 @@ fn run_tako_cli(
 
     let start = Instant::now();
     let status = loop {
+        if cancel_flag.is_some_and(|f| f.load(Ordering::Acquire)) {
+            kill_and_reap(&mut child);
+            let _ = out_handle.join();
+            let _ = err_handle.join();
+            return Err(BridgeError::new(
+                "cancelled",
+                "SOTA job cancelled by user.",
+            ));
+        }
         if overflow.load(Ordering::Acquire) {
-            let _ = child.kill();
-            let _ = child.wait();
+            kill_and_reap(&mut child);
             let _ = out_handle.join();
             let _ = err_handle.join();
             return Err(BridgeError::new(
@@ -945,8 +1396,7 @@ fn run_tako_cli(
             Ok(Some(st)) => break st,
             Ok(None) => {
                 if start.elapsed() >= timeout {
-                    let _ = child.kill();
-                    let _ = child.wait();
+                    kill_and_reap(&mut child);
                     let _ = out_handle.join();
                     let _ = err_handle.join();
                     return Err(BridgeError::new(
@@ -957,8 +1407,7 @@ fn run_tako_cli(
                 thread::sleep(Duration::from_millis(15));
             }
             Err(e) => {
-                let _ = child.kill();
-                let _ = child.wait();
+                kill_and_reap(&mut child);
                 return Err(BridgeError::new("internal", e.to_string()));
             }
         }
