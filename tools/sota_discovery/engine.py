@@ -536,8 +536,8 @@ def assess_accepted_coverage(
     }
 
 
-def _default_search_fn(query: str, per_page: int) -> list[dict[str, Any]]:
-    return fetch_openalex(query, per_page=per_page)
+def _default_search_fn(query: str, per_page: int, *, sort: str | None = None) -> list[dict[str, Any]]:
+    return fetch_openalex(query, per_page=per_page, sort=sort)
 
 
 def run_iterative_discovery(
@@ -583,13 +583,16 @@ def run_iterative_discovery(
     citation_cycles_prevented = 0
     citation_capability = "AVAILABLE" if citation_fn is not None else "UNAVAILABLE"
 
-    # Initial query queue
+    # Initial query queue (user topic + core foundational concept with citation sort + user seeds)
     query_queue: list[dict[str, Any]] = [
-        {"query_text": plan["topic"], "origin": "user_topic", "target_dimensions": ["core_topic"]}
+        {"query_text": plan["topic"], "origin": "user_topic", "target_dimensions": ["core_topic"]},
     ]
     core_q = _extract_core_concept_query(plan["topic"])
     if core_q and core_q.lower() != plan["topic"].lower():
-        query_queue.append({"query_text": core_q, "origin": "foundational_concept", "target_dimensions": ["core_topic"]})
+        query_queue.append({"query_text": core_q, "origin": "foundational_concept", "target_dimensions": ["core_topic"], "sort": "cited_by_count:desc"})
+        query_queue.append({"query_text": core_q, "origin": "contemporary_concept", "target_dimensions": ["core_topic"]})
+    else:
+        query_queue.append({"query_text": plan["topic"], "origin": "foundational_citation", "target_dimensions": ["core_topic"], "sort": "cited_by_count:desc"})
     for s in plan["user_seeds"]:
         query_queue.append({"query_text": s, "origin": "user_seed", "target_dimensions": []})
 
@@ -659,17 +662,24 @@ def run_iterative_discovery(
             qtext = str(qobj["query_text"] or "").strip()
             if not qtext:
                 continue
-            qnorm = qtext.lower()
+            qsort = str(qobj.get("sort") or "")
+            qnorm = f"{qtext.lower()}||{qsort}" if qsort else qtext.lower()
             if qnorm in seen_queries:
                 repeated_queries_prevented += 1
                 continue
             seen_queries.add(qnorm)
             search_requests += 1
             round_queries_run += 1
-            q_rec = {"round": rnd, "query": qtext, "origin": qobj["origin"], "status": "ok"}
+            q_rec = {"round": rnd, "query": qtext, "origin": qobj["origin"], "sort": qsort or None, "status": "ok"}
             executed_queries.append(q_rec)
             try:
-                hits = list(s_fn(qtext, limits.get("max_results_per_query", limits["max_papers"])) or [])
+                import inspect
+
+                per_q = limits.get("max_results_per_query", limits["max_papers"])
+                if qsort and "sort" in inspect.signature(s_fn).parameters:
+                    hits = list(s_fn(qtext, per_q, sort=qsort) or [])
+                else:
+                    hits = list(s_fn(qtext, per_q) or [])
                 for w in hits:
                     if len(buckets["RAW_CANDIDATES"]) >= limits["max_candidates"]:
                         break
@@ -807,13 +817,8 @@ def run_iterative_discovery(
                 buckets["BIBLIOGRAPHICALLY_VERIFIED"][cid] = rec
                 if scr["outcome"] == SCREEN_RELEVANT and rec["_abstract"]:
                     buckets["EVIDENCE_QUALIFIED"][cid] = rec
-                    max_acc = limits.get("max_accepted_papers", limits["max_papers"])
-                    if len(buckets["ACCEPTED_CORPUS"]) < max_acc:
-                        buckets["ACCEPTED_CORPUS"][cid] = rec
-                        accepted_gain += 1
-                    else:
-                        rec["Relevance rationale"] = f"{rec.get('Relevance rationale', '')}; accepted_corpus_cap_reached".strip("; ")
-                        buckets["CANDIDATES_FOR_LIMITED_USE"][cid] = rec
+                    buckets["ACCEPTED_CORPUS"][cid] = rec
+                    accepted_gain += 1
                 else:
                     buckets["CANDIDATES_FOR_LIMITED_USE"][cid] = rec
             else:
@@ -891,23 +896,31 @@ def run_iterative_discovery(
         else:
             termination_reason = TERM_MAX_ROUNDS_REACHED
 
-    # Compute transparent multi-signal relevance & foundational candidate annotations
+    # Compute transparent multi-signal relevance across ALL evidence-qualified candidates,
+    # then select top max_accepted_papers into ACCEPTED_CORPUS (fixing first-come-first-served truncation).
     in_corpus_ref_counts: dict[str, int] = {}
     for edge in citation_edges:
         tgt = edge.get("to") or ""
         if tgt:
             in_corpus_ref_counts[tgt] = in_corpus_ref_counts.get(tgt, 0) + 1
-    years_present = [r["Year"] for r in buckets["ACCEPTED_CORPUS"].values() if isinstance(r.get("Year"), int)]
+    years_present = [r["Year"] for r in buckets["EVIDENCE_QUALIFIED"].values() if isinstance(r.get("Year"), int)]
     year_bounds = (min(years_present), max(years_present)) if years_present else (None, None)
     ranked_items: list[tuple[float, float, str, dict[str, Any]]] = []
-    for cid, rec in buckets["ACCEPTED_CORPUS"].items():
+    for cid, rec in buckets["EVIDENCE_QUALIFIED"].items():
         sigs = compute_relevance_signals(rec, plan, in_corpus_ref_counts=in_corpus_ref_counts, year_bounds=year_bounds)
         rec["ranking_signals"] = sigs
         if sigs["foundational_candidate"] and str(rec.get("Seminal work candidate") or "").upper() in ("", "UNKNOWN", "NO"):
             rec["Seminal work candidate"] = sigs["seminal_status"]
         ranked_items.append((sigs["composite_relevance"], sigs["citation_lineage"], cid, rec))
     ranked_items.sort(key=lambda x: (-x[0], -x[1], x[2]))
-    buckets["ACCEPTED_CORPUS"] = {cid: rec for _, _, cid, rec in ranked_items}
+    max_acc = limits.get("max_accepted_papers", limits["max_papers"])
+    buckets["ACCEPTED_CORPUS"] = {}
+    for idx, (_, _, cid, rec) in enumerate(ranked_items):
+        if idx < max_acc:
+            buckets["ACCEPTED_CORPUS"][cid] = rec
+        else:
+            rec["Relevance rationale"] = f"{rec.get('Relevance rationale', '')}; ranked_below_accepted_cap".strip("; ")
+            buckets["CANDIDATES_FOR_LIMITED_USE"][cid] = rec
 
     final_cov = assess_accepted_coverage(
         list(buckets["ACCEPTED_CORPUS"].values()),

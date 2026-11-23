@@ -158,6 +158,48 @@ class M029CScientificIntelligenceTests(unittest.TestCase):
                 self.assertEqual(ext_cli["fields"]["architecture"], "Dual-branch encoder-decoder")
                 self.assertEqual(ext_cli["evidence_type"], "ABSTRACT_BASED")
 
+    def test_post_ranking_corpus_selection_and_citation_sort_forwarding(self):
+        plan = build_research_plan(
+            topic="Real-Time Semantic Segmentation for Edge AI",
+            objective="Identify efficient architectures and latency metrics",
+            max_papers=1,
+            max_rounds=2,
+            prefer_review_first=False,
+        )
+        seen_sorts: list[str | None] = []
+
+        def fake_search(q: str, n: int, *, sort: str | None = None):
+            seen_sorts.append(sort)
+            if sort == "cited_by_count:desc":
+                return [{
+                    "id": "https://openalex.org/W-seminal",
+                    "title": "High-Citation Real-Time Semantic Segmentation Architecture",
+                    "publication_year": 2021,
+                    "cited_by_count": 2500,
+                    "doi": "https://doi.org/10.1000/sem.2021",
+                    "authorships": [{"author": {"display_name": "S. Author"}}],
+                    "primary_location": {"source": {"display_name": "CVPR"}},
+                    "abstract_inverted_index": {"Real-time": [0], "semantic": [1], "segmentation": [2], "efficient": [3], "architecture": [4], "latency": [5], "edge": [6]},
+                    "referenced_works": [],
+                }]
+            return [{
+                "id": "https://openalex.org/W-low",
+                "title": "Low-Citation Real-Time Semantic Segmentation for Edge AI",
+                "publication_year": 2025,
+                "cited_by_count": 1,
+                "doi": "https://doi.org/10.1000/low.2025",
+                "authorships": [{"author": {"display_name": "L. Author"}}],
+                "primary_location": {"source": {"display_name": "Workshop"}},
+                "abstract_inverted_index": {"Real-time": [0], "semantic": [1], "segmentation": [2], "edge": [3]},
+                "referenced_works": [],
+            }]
+
+        res = run_iterative_discovery(plan, search_fn=fake_search)
+        self.assertIn("cited_by_count:desc", seen_sorts)
+        acc_titles = [r["Title"] for r in res["buckets"]["ACCEPTED_CORPUS"].values()]
+        # Even though W-low arrived first and max_papers=1, W-seminal must win post-ranking selection
+        self.assertEqual(acc_titles, ["High-Citation Real-Time Semantic Segmentation Architecture"])
+
 
 if __name__ == "__main__":
     unittest.main()
